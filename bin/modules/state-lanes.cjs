@@ -824,6 +824,16 @@ function sumWholeFileLoc(files) {
   return loc;
 }
 
+// What counts as a declared cross-cutting lane. Two callers ask it — the
+// register loop, which decides whether `lens: true` is persisted (and so
+// whether the envelope gets <lane_lens>), and the disjointness scan, which
+// decides whether the lane is exempt from the overlap warning. Written twice,
+// a third accepted spelling added at one site would exempt a lane from the
+// warning while leaving it without the block that explains why, or the reverse.
+function _isLensEntry(entry) {
+  return Boolean(entry) && (entry.lens === true || entry.disjoint === false);
+}
+
 function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef, lens }) {
   if (!id || typeof id !== "string" || !/^L\d+$/.test(id)) {
     return { ok: false, reason: `invalid id "${id}" (must match /^L\\d+$/, e.g. L1, L2)` };
@@ -1035,7 +1045,7 @@ function registerLanesFromYaml(filePath) {
       // YAML convention) and camelCase.
       repoRoot: entry.repo_root || entry.repoRoot,
       baseRef: entry.base_ref || entry.baseRef,
-      lens: entry.lens === true || entry.disjoint === false,
+      lens: _isLensEntry(entry),
       allowOverwrite: true, // bulk register is idempotent — re-runs replace
     });
     // review_file is surfaced because it is load-bearing and NOT derivable by
@@ -1048,9 +1058,17 @@ function registerLanesFromYaml(filePath) {
     // the partition file was written in. Field: reading `.scope` and `.files`
     // off this array returned null for every lane and was reported as
     // "0 lanes registered / files=0" — registration had in fact succeeded.
-    const laneScope = (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null;
-    const laneFileCount = r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null;
-    results.push({ id: entry.id, scope: laneScope, community: laneScope, ok: r.ok, reason: r.reason || null, review_file: r.ok && r.lane ? r.lane.review_file : null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, files: laneFileCount, file_count: laneFileCount });
+    const row = {
+      id: entry.id,
+      ok: r.ok,
+      reason: r.reason || null,
+      review_file: r.ok && r.lane ? r.lane.review_file : null,
+      size_class: r.ok ? r.lane.size_class : null,
+      est_loc: r.ok ? r.lane.est_loc : null,
+      community: (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null,
+      file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null,
+    };
+    results.push({ ...row, scope: row.community, files: row.file_count });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
@@ -1059,9 +1077,8 @@ function registerLanesFromYaml(filePath) {
   // findings at consolidation. Surfaced per [[telemetry-on-reduction]]: the
   // overlap is named, the operator decides.
   const fileOwners = new Map();
-  const lensLanes = new Set();
+  const lensLanes = new Set(lanes.filter(_isLensEntry).map((e) => e.id));
   for (const entry of lanes) {
-    if (entry.lens === true || entry.disjoint === false) lensLanes.add(entry.id);
     for (const f of (entry.files || [])) {
       if (!fileOwners.has(f)) fileOwners.set(f, []);
       fileOwners.get(f).push(entry.id);
@@ -1073,9 +1090,8 @@ function registerLanesFromYaml(filePath) {
   // to explain away — and the warning is the only signal distinguishing it from
   // a real double-assignment, so it must not cry wolf.
   const overlaps = Array.from(fileOwners.entries())
-    .map(([file, owners]) => ({ file, lanes: owners, owning: owners.filter(o => !lensLanes.has(o)) }))
-    .filter(o => o.owning.length > 1)
-    .map(({ file, lanes: owners }) => ({ file, lanes: owners }));
+    .filter(([, owners]) => owners.filter((o) => !lensLanes.has(o)).length > 1)
+    .map(([file, owners]) => ({ file, lanes: owners }));
   const out = { ok: errors.length === 0, registered: results, errors };
   if (overlaps.length > 0) {
     out.overlap_warning = `${overlaps.length} file(s) assigned to multiple lanes — duplicated review tokens + conflicting findings likely; lanes are expected to be disjoint`;

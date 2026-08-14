@@ -2034,7 +2034,7 @@ function run(subcommand, args) {
     case "update-lane":
       return updateLane(args[0], args.slice(1));
     case "register-lane": {
-      // Args: --id=L1 --scope=identity --files=a.py,b.py [--overwrite]
+      // Args: --id=L1 --scope=identity --files=a.py,b.py [--lens] [--overwrite]
       const getFlag = (name) => {
         const inline = args.find(a => a.startsWith(`--${name}=`));
         if (inline) return inline.slice(`--${name}=`.length);
@@ -2048,6 +2048,7 @@ function run(subcommand, args) {
         files: filesRaw ? filesRaw.split(",").map(s => s.trim()).filter(Boolean) : [],
         repoRoot: getFlag("repo-root"),
         baseRef: getFlag("base"),
+        lens: args.includes("--lens"),
         allowOverwrite: args.includes("--overwrite"),
       });
     }

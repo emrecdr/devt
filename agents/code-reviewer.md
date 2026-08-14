@@ -59,9 +59,9 @@ BEFORE starting the review, load the following in order:
 
    **Community filter for large reviews (budget protection)**: when `graph-impact.md` lists a non-empty `affected_communities` AND the code-review-input file count exceeds 10, **restrict the initial-pass deep review to files in those communities only**. Files outside the affected communities go into an `## Out-of-Scope Files (Deferred)` section in `review.md` with one line per file: `<path> — deferred (outside community: <community names>)`. The orchestrator can dispatch a follow-up review for the deferred set if needed. Rationale: a single code-reviewer dispatch has a turn budget; reviewing 30+ files deeply exhausts it before findings can be written. Community-filtered initial-pass keeps the dispatch within budget and surfaces the highest-leverage findings first. When `graph-impact.md` is absent OR `affected_communities` is empty OR scope ≤10 files, review every file in scope normally (no deferral).
 
-**DISTRUST PRINCIPLE**: Read impl-summary.md for ORIENTATION only — what files were touched,
-what the programmer claims. Then VERIFY every claim by reading the actual code.
-Summaries document what the programmer SAID they did. You verify what ACTUALLY exists.
+**DISTRUST PRINCIPLE**: Read impl-summary.md for ORIENTATION only — what files were touched, what the programmer claims. Then VERIFY every claim by reading the actual code. Summaries document what the programmer SAID they did. You verify what ACTUALLY exists.
+
+**SEARCH DISCIPLINE**: ground existence and absence claims in git-TRACKED content — prefer `git grep` (tracked only) or `rg` (honours .gitignore) over `grep -r`. Untracked build output (local-history snapshots, coverage HTML, type-checker caches) holds stale copies of the very files under review, so a search that includes them can appear to DISPROVE a "no remaining readers" claim for a deletion, or resurrect a symbol the branch removed. If a claim rests on searching untracked paths, say so in the finding.
 
 Do NOT skip any of these — reviewing without the project's rules means reviewing against your own preferences, not the project's.
 </context_loading>

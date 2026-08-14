@@ -101,6 +101,19 @@ const ATTESTATION_FIELDS = Object.freeze([
   "original_args", "override_args", "override_reason", "override_evidence", "override_by", "timestamp",
 ]);
 
+// The canonical "this drill found nothing" marker, matched by PREFIX because
+// compose-drilldowns has a second variant that appends a DI factory-site hint
+// whose own text carries parentheses ("… ; DI factory site: app/x.py (+3
+// DI-wired edges)") — a pattern demanding the closing `)_` credits the bare
+// form and fails the more informative one.
+//
+// Module-scoped because TWO consumers read it: the substance gate (an empty
+// drill is validly considered, not padding) and the drill-waste classifier (an
+// empty drill did not yield data). They held private copies and drifted — the
+// classifier was still scoring a DI-hinted empty drill as having yielded data,
+// which is precisely the conflation its own comment says must not happen.
+const EMPTY_DRILL_MARKER_RE = /_\(no (?:direct )?neighbors found in direction=(?:in|out|both)\b/i;
+
 function assertGraphifyDecision() {
   const graphify = require("./graphify.cjs");
   const status = graphify.status();
@@ -199,12 +212,6 @@ function assertGraphifyDecision() {
   // `compose-drilldowns` emits the canonical marker for this case; the gate
   // honors it as "validly considered, empty by data" — distinct from "skipped"
   // (no section at all) and "fake" (prose padding to clear 200 bytes).
-  // Matched by PREFIX, not by the full parenthesised form: compose-drilldowns
-  // has a second variant that appends a DI factory-site hint whose own text
-  // carries parentheses ("… ; DI factory site: app/x.py (+3 DI-wired edges)"),
-  // so a pattern demanding the closing `)_` credits the bare form and fails the
-  // more informative one.
-  const EMPTY_MARKER_RE = /_\(no (?:direct )?neighbors found in direction=(?:in|out|both)\b/i;
   // Third substance case: thin because the SUBGRAPH is thin. The markers above
   // cover "too big to inline" and "no neighbors at all"; neither fits a
   // drill-down whose one real caller survived 32 filtered noise nodes, so
@@ -213,6 +220,10 @@ function assertGraphifyDecision() {
   // result whenever a filter dropped anything — the same class of evidence as
   // the empty marker, emitted all along with nothing reading it.
   const FILTERED_MARKER_RE = /_\(filtered:\s*\w+=\d+(?:,\s*\w+=\d+)*\)_/i;
+  // Any one of these means the section is short by DATA, not by neglect. Listed
+  // rather than chained so a fourth exemption is one array entry, not another
+  // `&&` clause on an already-long condition.
+  const SUBSTANCE_MARKERS = [TRUNCATION_MARKER_RE, EMPTY_DRILL_MARKER_RE, FILTERED_MARKER_RE];
   const thinDrillDowns = [];
   let thinDrillDownSections = 0;
   try {
@@ -243,10 +254,7 @@ function assertGraphifyDecision() {
           // handled by the split lookahead) or EOF.
           const body = lines.slice(1).join("\n").trim();
           const bodyBytes = Buffer.byteLength(body, "utf8");
-          const hasTruncMarker = TRUNCATION_MARKER_RE.test(body);
-          const hasEmptyMarker = EMPTY_MARKER_RE.test(body);
-          const hasFilteredMarker = FILTERED_MARKER_RE.test(body);
-          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !hasTruncMarker && !hasEmptyMarker && !hasFilteredMarker) {
+          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !SUBSTANCE_MARKERS.some((re) => re.test(body))) {
             thinDrillDownSections++;
             const symMatch = heading.match(/^##\s+Drill-down:\s*(.+?)\s*$/i);
             thinDrillDowns.push({
@@ -494,10 +502,11 @@ function graphifyRoi() {
   // nobody cited" — they're different waste classes demanding different
   // fixes (drill-selection vs drill-value). Collapsing them hides the lever.
   const corrIdRe = /([0-9a-f]{8})/g;
-  // Canonical empty marker from compose-drilldowns +
-  // explicit "results: []" + parenthetical "(empty ...)" + "no usable"
-  // patterns. If ANY match, drill yielded no data.
-  const emptyMarkerRe = /(_\(no neighbors found in direction=(?:in|out|both)\)_|results\s*:\s*\[\s*\]|\(empty\b|no usable caller set)/i;
+  // The canonical marker (module-scoped, shared with the substance gate) plus
+  // the looser shapes a drill body can take: explicit "results: []",
+  // parenthetical "(empty ...)", "no usable". If ANY match, drill yielded no
+  // data.
+  const emptyProseRe = /(results\s*:\s*\[\s*\]|\(empty\b|no usable caller set)/i;
   for (let i = 0; i < drillSections.length; i++) {
     const start = drillSections[i].heading_index;
     const end = i + 1 < drillSections.length ? drillSections[i + 1].heading_index : impactContent.length;
@@ -510,7 +519,7 @@ function graphifyRoi() {
       if (ids.size >= 5) break;
     }
     drillSections[i].corr_ids = Array.from(ids);
-    drillSections[i].yielded_data = !emptyMarkerRe.test(section);
+    drillSections[i].yielded_data = !(EMPTY_DRILL_MARKER_RE.test(section) || emptyProseRe.test(section));
   }
 
   // 3-state citation: "strong" (corr_id match) / "weak" (symbol-name

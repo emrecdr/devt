@@ -57,7 +57,7 @@ KCORPUS_SHA0=$(KCORPUS_DIGEST)
 # emits TWO lines the moment the ledger is clean — the count then differs from
 # itself between two identical readings and the gate fails on its own arithmetic
 # (CON-003). Defuse with `|| true`, then normalize the missing-file empty to 0.
-KSTATE_RAW() { (cd "$ROOT" && n=$({ /usr/bin/grep -ac '"source":"raw_dispatch"' .devt/state/dispatch-warnings.jsonl 2>/dev/null || true; } | head -1); echo "${n:-0}"); }
+KSTATE_RAW() { (cd "$ROOT" && n=$(/usr/bin/grep -ac '"source":"raw_dispatch"' .devt/state/dispatch-warnings.jsonl 2>/dev/null || true); echo "${n:-0}"); }
 KSTATE_TASK() { (cd "$ROOT" && /usr/bin/sed -n 's/^task: *//p' .devt/state/workflow.yaml 2>/dev/null | head -1 || true); }
 KSTATE_RAW0=$(KSTATE_RAW)
 KSTATE_TASK0=$(KSTATE_TASK)
@@ -5185,15 +5185,11 @@ fi
 
 # run-hook.js writes a trace record on every invocation (enabled or disabled).
 # Without this, debugging "did the CC harness actually invoke this hook?" requires
-# adding ad-hoc logging mid-incident. CI runs from a clean checkout where
-# .devt/state/ doesn't exist yet (gitignored), so pre-create it explicitly —
-# the trace function performs an upward search and silently no-ops when no
-# state dir is found (intentional: trace failures must never break hooks).
-# Runs inside a fixture project rather than the repo root. Both the trace writer
-# and the guard resolve their state dir by walking up from cwd, so a root-run
-# probe writes to devt's own .devt/state/ — the previous backup-and-restore dance
-# covered run-hook.jsonl and left the guard's dispatch-warnings.jsonl append
-# behind, seeding a fake raw_dispatch into devt's ledger on every suite run.
+# adding ad-hoc logging mid-incident. Runs inside a fixture project carrying its
+# own .devt/state: both the trace writer and the guard resolve state by walking
+# UP from cwd and silently no-op when they find none, so the fixture needs the
+# dir — and a root-run probe would instead write into devt's live state, which is
+# how a fake raw_dispatch was seeded into its ledger on every suite run.
 TRACE_FX=$(mktemp -d); mkdir -p "$TRACE_FX/.devt/state"
 TRACE_TMP="$TRACE_FX/.devt/state/hook-trace/run-hook.jsonl"
 ( echo '{"tool_name":"Task","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"smoke-trace probe"}}' | \
@@ -12306,9 +12302,10 @@ K92_PROBE_HAND_INJECTED='{"tool_name":"Agent","tool_input":{"subagent_type":"dev
 K92_PROBE_DOCS_WRITER='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:docs-writer","prompt":"You are the docs-writer for Batch A. Update changelog."}}'
 K92_PROBE_BARE='{"tool_name":"Agent","tool_input":{"subagent_type":"devt:code-reviewer","prompt":"You are reviewing Lane A. Just do it."}}'
 K92_FX=$(mktemp -d); mkdir -p "$K92_FX/.devt/state"
-K92_HAND_RESULT=$(cd "$K92_FX" && echo "$K92_PROBE_HAND_INJECTED" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
-K92_DOCS_RESULT=$(cd "$K92_FX" && echo "$K92_PROBE_DOCS_WRITER" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
-K92_BARE_RESULT=$(cd "$K92_FX" && echo "$K92_PROBE_BARE" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null)
+K92_RUN() { (cd "$K92_FX" && printf '%s' "$1" | CLAUDE_PLUGIN_ROOT="$ROOT" node "$ROOT/hooks/run-hook.js" dispatch-hygiene-guard.sh 2>/dev/null); }
+K92_HAND_RESULT=$(K92_RUN "$K92_PROBE_HAND_INJECTED")
+K92_DOCS_RESULT=$(K92_RUN "$K92_PROBE_DOCS_WRITER")
+K92_BARE_RESULT=$(K92_RUN "$K92_PROBE_BARE")
 rm -rf "$K92_FX"
 # Hand-injected and docs-writer should produce NO deny output (empty stdout).
 K92_HAND_PASS=$([ -z "$K92_HAND_RESULT" ] && echo yes || echo no)
@@ -17835,7 +17832,7 @@ printf '%s' "$K292_FOOT" | /usr/bin/grep -q '\[memory\] candidates-footer: [0-9]
 rm -rf "$K292_TMP"
 { /usr/bin/grep -qF 'is missing its "status" field (JSON sidecar routing contract)' "$ROOT/bin/modules/state-io.cjs" \
   && /usr/bin/grep -qF 'Diffstat basis: count only +/- change lines' "$ROOT/bin/modules/state-lanes.cjs" \
-  && /usr/bin/grep -qF 'files: laneFileCount, file_count: laneFileCount' "$ROOT/bin/modules/state-lanes.cjs" \
+  && /usr/bin/grep -qF 'scope: row.community, files: row.file_count' "$ROOT/bin/modules/state-lanes.cjs" \
   && /usr/bin/grep -qF 'On-ramp:' "$ROOT/bin/modules/state-gates.cjs"; } || { K292_OK=0; K292_MISS="$K292_MISS cli-pins"; }
 { /usr/bin/grep -qF 'Dispatch via the POINTER STUB' "$ROOT/workflows/code-review-parallel.md" \
   && /usr/bin/grep -qF 'non-default base in THIS repo' "$ROOT/workflows/code-review-parallel.md" \
@@ -21110,6 +21107,9 @@ F66_WARN() { (cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" state register-lane
 # Registration echoes the caller's `scope`/`files` vocabulary, not only the
 # registry's `community`/`file_count` (reading `.scope` returned null for every
 # lane and was reported in the field as "0 lanes registered / files=0").
+# This re-register is also load-bearing SETUP for the readback + envelope legs
+# below: plain.yaml overwrote L1/L2 without the flag, so lens.yaml has to be the
+# last partition registered or `readback` reads a lane that never declared one.
 F66_VOCAB=$( (cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from="$F66_T/lens.yaml" 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s),r=(o.registered||[])[0]||{};console.log(r.scope&&r.community&&r.files!=null&&r.file_count!=null?'vocab':'missing')}catch{console.log('err')}});")
 [ "$F66_VOCAB" = "vocab" ] && F66="${F66}vocab,"
 # Read-back: the flag must survive workflow.yaml, or the envelope cannot see it.
@@ -21124,12 +21124,18 @@ try{
   const l1=f.filter(n=>g(n).includes('<lane_id>L1<'))[0], l2=f.filter(n=>g(n).includes('<lane_id>L2<'))[0];
   const a=g(l1), b=g(l2);
   const lensOk = !a.includes('<lane_lens>') && b.includes('<lane_lens>');
-  const nbOk = a.includes('own the areas below') && b.includes('own the LOGIC of the areas below');
-  const searchOk = a.includes('<search_discipline>') && b.includes('<search_discipline>');
-  console.log([lensOk?'envlens':'', nbOk?'envneighbors':'', searchOk?'search':''].filter(Boolean).join(','));
+  const nbOk = a.includes('own the areas below') && b.includes('own the LOGIC of the areas below')
+    && [a,b].every(s => s.includes('so the consolidator can route it instead of guessing'));
+  console.log([lensOk?'envlens':'', nbOk?'envneighbors':''].filter(Boolean).join(','));
 }catch(e){console.log('err')}")
 [ -n "$F66_ENV" ] && [ "$F66_ENV" != "err" ] && F66="${F66}${F66_ENV},"
 rm -rf "$F66_T"
+# The corpus rule is reviewer discipline, not lane discipline: one agent reviews
+# a lane, consolidates, AND runs single-dispatch, and all three make absence
+# claims. Asserted in the agent body (every shape carries it) AND absent from the
+# lane envelope, so it cannot drift back into per-lane duplication.
+{ /usr/bin/grep -qF 'SEARCH DISCIPLINE' "$ROOT/agents/code-reviewer.md" \
+  && ! /usr/bin/grep -qF '<search_discipline>' "$ROOT/bin/modules/dispatch.cjs"; } && F66="${F66}search,"
 # Substance gate credits the two markers compose-drilldowns already emits: a
 # filtered-node count (thin because the SUBGRAPH is thin) and the DI-factory-hint
 # variant of the empty marker, whose own text carries parentheses.
@@ -21143,19 +21149,38 @@ printf '%s\n## Drill-down: A\n_(filtered: noise=32, di_aggregation=1)_\n## Drill
 [ "$(F66_THIN)" = "0" ] && F66="${F66}sparse,"
 printf '%s\n## Drill-down: A\ntiny\n## Drill-down: B\ntiny\n## Drill-down: C\n_(no neighbors found in direction=in)_\n' "$F66_HDR" > "$F66_G/.devt/state/graph-impact.md"
 [ "$(F66_THIN)" = "2" ] && F66="${F66}fakestill,"
+# The empty marker has a SECOND consumer — the drill-waste classifier — and the
+# two held private copies. A DI-hinted empty drill therefore scored as "returned
+# data nobody cited" (a drill-VALUE problem) when it had returned nothing at all
+# (a drill-SELECTION problem): precisely the conflation that code's own comment
+# forbids. Behavioral, because a shared constant is only shared if both read it.
+printf '## Drill-down: DIOnly [call: aaaa1111]\n_(no direct neighbors found in direction=in; DI factory site: app/x.py (+3 DI-wired edges))_\n\n## Drill-down: Real [call: cccc3333]\n- **Caller** (relation=calls, depth=1)\n' > "$F66_G/.devt/state/graph-impact.md"
+F66_ROI=$(cd "$F66_G" && DEVT_MODULES="$ROOT/bin/modules" node -e '
+const sg=require(process.env.DEVT_MODULES+"/state-graphify.cjs");
+const d=(sg.graphifyRoi()||{}).per_drill||[];
+const di=d.find(s=>String(s.symbol).includes("DIOnly")), real=d.find(s=>String(s.symbol).includes("Real"));
+console.log(di&&real&&di.yielded_data===false&&real.yielded_data===true?"roi":"drift");
+' 2>/dev/null)
+[ "$F66_ROI" = "roi" ] && F66="${F66}roi,"
 rm -rf "$F66_G"
 # --fresh is consumed at substep 0; persisting it puts the flag into the task
 # text that feeds preflight, the memory signal, and taskChanged. --range must
 # survive (partition_lanes reads it back out) and "refresh" must not be mangled.
-F66_STRIP=$(printf '%s' " review auth --fresh --range=a..b " | sed -E 's/ --fresh / /g; s/^ +//; s/ +$//')
-F66_KEEP=$(printf '%s' " review the refresh logic " | sed -E 's/ --fresh / /g; s/^ +//; s/ +$//')
+# ONE expression drives both the behavioral checks and the pin, so the gate
+# cannot end up validating a regex the workflow no longer uses. The strip stays
+# in workflow prose rather than the CLI deliberately: --range, --lite and
+# --no-refresh are re-read FROM the persisted task by later steps, so a
+# context-init-side strip would need a per-flag allowlist.
+F66_SED='s/ --fresh / /g; s/^ +//; s/ +$//'
+F66_STRIP=$(printf '%s' " review auth --fresh --range=a..b " | sed -E "$F66_SED")
+F66_KEEP=$(printf '%s' " review the refresh logic " | sed -E "$F66_SED")
 { [ "$F66_STRIP" = "review auth --range=a..b" ] && [ "$F66_KEEP" = "review the refresh logic" ] \
-  && /usr/bin/grep -qF 's/ --fresh / /g' "$ROOT/workflows/code-review.md"; } && F66="${F66}freshstrip,"
+  && /usr/bin/grep -qF "$F66_SED" "$ROOT/workflows/code-review.md"; } && F66="${F66}freshstrip,"
 F66_OUT="${F66%,}"
-if [ "$F66_OUT" = "lensyaml,lensjson,lenswarn,vocab,readback,envlens,envneighbors,search,sparse,fakestill,freshstrip" ]; then
+if [ "$F66_OUT" = "lensyaml,lensjson,lenswarn,vocab,readback,envlens,envneighbors,search,sparse,fakestill,roi,freshstrip" ]; then
   pass "F66: a declared lens lane survives partition-file → registry → workflow.yaml → envelope (and only OWNING lanes trip the disjointness warning), registration answers in the vocabulary it was asked in, a filtered-thin subgraph and a DI-hinted empty one both count as substance while padding still does not, lane briefs ground existence claims in tracked content, and --fresh never reaches the persisted scope"
 else
-  fail "F66: calibration batch regressed — got '$F66_OUT' (want lensyaml,lensjson,lenswarn,vocab,readback,envlens,envneighbors,search,sparse,fakestill,freshstrip)"
+  fail "F66: calibration batch regressed — got '$F66_OUT' (want lensyaml,lensjson,lenswarn,vocab,readback,envlens,envneighbors,search,sparse,fakestill,roi,freshstrip)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)
