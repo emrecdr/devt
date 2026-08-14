@@ -1901,12 +1901,25 @@ function cmdRenderLanes(target, options) {
     const laneSidecar = lane.review_file
       ? String(lane.review_file).replace(/\.md$/, ".json")
       : `review-lane-${lane.id}.json`;
+    const isLens = lane.lens === true;
     const blockLines = [
       `    <lane_id>${lane.id}</lane_id>`,
       `    <lane_community>${community}</lane_community>`,
       `    <correlation_id>${correlationId}</correlation_id>`,
       `    <lane_files>\n${files.map(f => `      ${f}`).join("\n")}\n    </lane_files>`,
       `    <memory_affects>${memoryAffects}</memory_affects>`,
+      // A lens lane is registered over files other lanes own, deliberately.
+      // Without this block the neighbor rule below ("another lane's files are
+      // THEIRS") reads as an instruction to skip the exact work the lane exists
+      // to do — and the operator was writing this paragraph by hand every run.
+      // A "nothing reads this any more" claim is only as good as the corpus it
+      // was searched against. Untracked build output holds stale copies of the
+      // files under review, so a plain recursive grep can appear to REFUTE a
+      // deletion's zero-readers finding using the pre-change source it just
+      // deleted. Stated as a corpus rule rather than a path list: the noise
+      // directories differ per project, "tracked" does not.
+      `    <search_discipline>Ground existence and absence claims in git-TRACKED content: prefer \`git grep\` (tracked only) or \`rg\` (honours .gitignore) over \`grep -r\`. Untracked build output — local-history snapshots, coverage HTML, type-checker caches — carries stale copies of the very files under review, so a search that includes them can appear to DISPROVE a "no remaining readers" claim for a deletion, or resurrect a symbol the branch removed. If a claim rests on searching untracked paths, say so in the finding.</search_discipline>`,
+      ...(isLens ? [`    <lane_lens>This lane is a DECLARED LENS: it reads files other lanes also own, on purpose. Review them through your lens (${community}) ONLY — the compliance, contract, coverage, or documentation question your scope names. Do NOT re-review the logic of those files: the owning lane is doing that, and a duplicate logic finding costs the consolidator a dedup it cannot always make correctly. Overlap with other lanes is expected here and is not a partitioning error.</lane_lens>`] : []),
       // Emitted only when the pinned rubric actually marks an axis lane-skip.
       // Said here, where only lanes can see it, rather than weakening the
       // single reviewer's instruction — that reviewer genuinely owns axis H.
@@ -1922,7 +1935,9 @@ function cmdRenderLanes(target, options) {
     const neighbors = laneOwnership.filter((n) => n.id !== lane.id);
     if (neighbors.length > 0) {
       blockLines.push(
-        `    <lane_neighbors>Other lanes in this review own the areas below. A finding whose fix lives in another lane's files is THEIRS — name the lane and the file rather than fixing or re-reviewing it here, and say so explicitly so the consolidator can route it instead of guessing.\n` +
+        `    <lane_neighbors>${isLens
+          ? "Other lanes in this review own the LOGIC of the areas below — including files you also read. Your findings must be lens-scoped: a logic defect in their files is THEIRS, so name the lane and the file rather than writing it up here, and say so explicitly so the consolidator can route it instead of guessing."
+          : "Other lanes in this review own the areas below. A finding whose fix lives in another lane's files is THEIRS — name the lane and the file rather than fixing or re-reviewing it here, and say so explicitly so the consolidator can route it instead of guessing."}\n` +
         neighbors.map((n) => `      ${n.id} (${n.community || "unscoped"}): ${n.count} file(s)${n.areas.length ? ` under ${n.areas.join(", ")}` : ""}`).join("\n") +
         `\n    </lane_neighbors>`,
       );

@@ -156,6 +156,11 @@ function listLaneOutputs() {
     const sizeBasis = (block.match(/^\s+size_basis:\s*"?([\w-]+)"?\s*$/m) || [])[1] || null;
     const diffArtifact = (block.match(/^\s+diff_artifact:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
     const correlationId = (block.match(/^\s+correlation_id:\s*"?([^"\n]+)"?\s*$/m) || [])[1] || null;
+    // Declared cross-cutting lane. Emitted unconditionally as a boolean (like
+    // `stale`) rather than only when set: a field that appears on some lanes and
+    // not others is exactly the shape that makes a consumer's `.lens` read
+    // indistinguishable between "not a lens" and "this key does not exist".
+    const lens = /^\s+lens:\s*true\s*$/m.test(block);
     if (!id) continue;
     let sizeBytes = 0;
     let exists = false;
@@ -251,6 +256,7 @@ function listLaneOutputs() {
       diff_artifact: diffArtifact,
       file_exists: exists,
       file_size_bytes: sizeBytes,
+      lens,
       stale,
       cid_match: cidMatch,
       cid_prefix: cidPrefix,
@@ -818,7 +824,7 @@ function sumWholeFileLoc(files) {
   return loc;
 }
 
-function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
+function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef, lens }) {
   if (!id || typeof id !== "string" || !/^L\d+$/.test(id)) {
     return { ok: false, reason: `invalid id "${id}" (must match /^L\\d+$/, e.g. L1, L2)` };
   }
@@ -914,6 +920,11 @@ function registerLane({ id, scope, files, allowOverwrite, repoRoot, baseRef }) {
       // review file), and callers had to hand-roll their own cid.
       correlation_id: `cid_${String(state.workflow_id || "noworkflow").split("-")[0]}_${id}`,
     };
+    // A lens lane reviews files other lanes own, deliberately — a cross-cutting
+    // pass (plan compliance, changelog, contract audit) over the same code the
+    // logic lanes read. Only declared here so the disjointness warning and the
+    // lane envelope can tell it apart from an accidental double-assignment.
+    if (lens === true) laneEntry.lens = true;
     if (diff.ok) laneEntry.diff_artifact = diff.artifact;
     if (diff.ok && diff.diff_lines !== estLoc) laneEntry.diff_lines_raw = diff.diff_lines;
     if (existing !== -1) {
@@ -984,6 +995,14 @@ function registerLanesFromYaml(filePath) {
         inFiles = false;
         const m = line.match(/(repo_root|base_ref):\s*"?([^"\n]+)"?\s*$/);
         if (m) current[m[1]] = m[2].trim();
+      } else if (current && /^\s+(lens|disjoint):/.test(line)) {
+        // Parsed as a real boolean: every other key here is a string, and a
+        // lane property this parser does not name is dropped without a word —
+        // the flag would read as absent on the YAML path and work on the JSON
+        // path, which is the worst of the two possible failures.
+        inFiles = false;
+        const m = line.match(/(lens|disjoint):\s*"?(true|false)"?\s*$/i);
+        if (m) current[m[1].toLowerCase()] = m[2].toLowerCase() === "true";
       } else if (current && /^\s+files:\s*\[/.test(line)) {
         // Inline array form: files: [a.py, b.py]
         inFiles = false;
@@ -1009,13 +1028,14 @@ function registerLanesFromYaml(filePath) {
   for (const entry of lanes) {
     const r = registerLane({
       id: entry.id,
-      scope: entry.scope,
+      scope: entry.scope || entry.community,
       files: entry.files,
       // Per-lane repo/base passthrough for cross-repo lanes (sibling
       // repository with its own diff base). Accepts both snake_case (JSON/
       // YAML convention) and camelCase.
       repoRoot: entry.repo_root || entry.repoRoot,
       baseRef: entry.base_ref || entry.baseRef,
+      lens: entry.lens === true || entry.disjoint === false,
       allowOverwrite: true, // bulk register is idempotent — re-runs replace
     });
     // review_file is surfaced because it is load-bearing and NOT derivable by
@@ -1023,7 +1043,14 @@ function registerLanesFromYaml(filePath) {
     // operator writing dispatch prompts by hand cannot guess it. The batch path
     // dropped it while the single-lane path returned it, and every hand-written
     // lane then reported file_exists:false.
-    results.push({ id: entry.id, community: (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null, ok: r.ok, reason: r.reason || null, review_file: r.ok && r.lane ? r.lane.review_file : null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, file_count: r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null });
+    // The registry stores the caller's `scope` under `community`, so a response
+    // keyed only by the registry's vocabulary is unreadable with the vocabulary
+    // the partition file was written in. Field: reading `.scope` and `.files`
+    // off this array returned null for every lane and was reported as
+    // "0 lanes registered / files=0" — registration had in fact succeeded.
+    const laneScope = (r.ok && r.lane && r.lane.community) || entry.scope || entry.community || null;
+    const laneFileCount = r.ok && r.lane ? (r.lane.file_count ?? (Array.isArray(r.lane.files) ? r.lane.files.length : null)) : null;
+    results.push({ id: entry.id, scope: laneScope, community: laneScope, ok: r.ok, reason: r.reason || null, review_file: r.ok && r.lane ? r.lane.review_file : null, size_class: r.ok ? r.lane.size_class : null, est_loc: r.ok ? r.lane.est_loc : null, files: laneFileCount, file_count: laneFileCount });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
@@ -1032,15 +1059,23 @@ function registerLanesFromYaml(filePath) {
   // findings at consolidation. Surfaced per [[telemetry-on-reduction]]: the
   // overlap is named, the operator decides.
   const fileOwners = new Map();
+  const lensLanes = new Set();
   for (const entry of lanes) {
+    if (entry.lens === true || entry.disjoint === false) lensLanes.add(entry.id);
     for (const f of (entry.files || [])) {
       if (!fileOwners.has(f)) fileOwners.set(f, []);
       fileOwners.get(f).push(entry.id);
     }
   }
+  // Overlap is only a defect between two lanes that each claim to own the file's
+  // logic. A declared lens lane is SUPPOSED to share files, so counting it as an
+  // owner turns a deliberate cross-cutting pass into a warning the operator has
+  // to explain away — and the warning is the only signal distinguishing it from
+  // a real double-assignment, so it must not cry wolf.
   const overlaps = Array.from(fileOwners.entries())
-    .filter(([, owners]) => owners.length > 1)
-    .map(([file, owners]) => ({ file, lanes: owners }));
+    .map(([file, owners]) => ({ file, lanes: owners, owning: owners.filter(o => !lensLanes.has(o)) }))
+    .filter(o => o.owning.length > 1)
+    .map(({ file, lanes: owners }) => ({ file, lanes: owners }));
   const out = { ok: errors.length === 0, registered: results, errors };
   if (overlaps.length > 0) {
     out.overlap_warning = `${overlaps.length} file(s) assigned to multiple lanes — duplicated review tokens + conflicting findings likely; lanes are expected to be disjoint`;

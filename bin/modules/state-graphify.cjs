@@ -199,7 +199,20 @@ function assertGraphifyDecision() {
   // `compose-drilldowns` emits the canonical marker for this case; the gate
   // honors it as "validly considered, empty by data" — distinct from "skipped"
   // (no section at all) and "fake" (prose padding to clear 200 bytes).
-  const EMPTY_MARKER_RE = /_\(no neighbors found in direction=(?:in|out|both)\)_/i;
+  // Matched by PREFIX, not by the full parenthesised form: compose-drilldowns
+  // has a second variant that appends a DI factory-site hint whose own text
+  // carries parentheses ("… ; DI factory site: app/x.py (+3 DI-wired edges)"),
+  // so a pattern demanding the closing `)_` credits the bare form and fails the
+  // more informative one.
+  const EMPTY_MARKER_RE = /_\(no (?:direct )?neighbors found in direction=(?:in|out|both)\b/i;
+  // Third substance case: thin because the SUBGRAPH is thin. The markers above
+  // cover "too big to inline" and "no neighbors at all"; neither fits a
+  // drill-down whose one real caller survived 32 filtered noise nodes, so
+  // accurately reporting a sparse neighborhood failed a gate built to catch
+  // fabrication. compose-drilldowns already writes this marker from the query
+  // result whenever a filter dropped anything — the same class of evidence as
+  // the empty marker, emitted all along with nothing reading it.
+  const FILTERED_MARKER_RE = /_\(filtered:\s*\w+=\d+(?:,\s*\w+=\d+)*\)_/i;
   const thinDrillDowns = [];
   let thinDrillDownSections = 0;
   try {
@@ -232,7 +245,8 @@ function assertGraphifyDecision() {
           const bodyBytes = Buffer.byteLength(body, "utf8");
           const hasTruncMarker = TRUNCATION_MARKER_RE.test(body);
           const hasEmptyMarker = EMPTY_MARKER_RE.test(body);
-          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !hasTruncMarker && !hasEmptyMarker) {
+          const hasFilteredMarker = FILTERED_MARKER_RE.test(body);
+          if (bodyBytes < DRILL_DOWN_MIN_BYTES && !hasTruncMarker && !hasEmptyMarker && !hasFilteredMarker) {
             thinDrillDownSections++;
             const symMatch = heading.match(/^##\s+Drill-down:\s*(.+?)\s*$/i);
             thinDrillDowns.push({

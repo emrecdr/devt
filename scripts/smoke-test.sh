@@ -17821,7 +17821,7 @@ printf '%s' "$K292_FOOT" | /usr/bin/grep -q '\[memory\] candidates-footer: [0-9]
 rm -rf "$K292_TMP"
 { /usr/bin/grep -qF 'is missing its "status" field (JSON sidecar routing contract)' "$ROOT/bin/modules/state-io.cjs" \
   && /usr/bin/grep -qF 'Diffstat basis: count only +/- change lines' "$ROOT/bin/modules/state-lanes.cjs" \
-  && /usr/bin/grep -qF 'file_count: r.ok && r.lane' "$ROOT/bin/modules/state-lanes.cjs" \
+  && /usr/bin/grep -qF 'files: laneFileCount, file_count: laneFileCount' "$ROOT/bin/modules/state-lanes.cjs" \
   && /usr/bin/grep -qF 'On-ramp:' "$ROOT/bin/modules/state-gates.cjs"; } || { K292_OK=0; K292_MISS="$K292_MISS cli-pins"; }
 { /usr/bin/grep -qF 'Dispatch via the POINTER STUB' "$ROOT/workflows/code-review-parallel.md" \
   && /usr/bin/grep -qF 'non-default base in THIS repo' "$ROOT/workflows/code-review-parallel.md" \
@@ -21051,6 +21051,97 @@ if [ "$F64_OUT" = "reconciled,reported,ranked,honest,scoped,override,nosubmit" ]
   pass "F64: the truncation notice lists only symbols no leg submitted (recovered ones counted, not absorbed), ranking sees uncommitted AND untracked work without mutating the caller\x27s index, the notice no longer claims an ordering it abandoned, and a graph-node filter that did not run says so"
 else
   fail "F64: truncation-notice honesty regressed — probe='$F64_OUT' (want reconciled,reported,ranked,honest,scoped,override,nosubmit) graph_filter=$F64_FILT (want declared)"
+fi
+
+# F66: the field-calibration batch. A declared lens lane survives every hop from
+# partition file to envelope (three separate parsers had to learn the key, and
+# each silently dropped it); registration answers in the vocabulary it was asked
+# in; a sparse subgraph is not mistaken for a fabricated one; lane briefs name
+# the corpus an existence claim must rest on; and --fresh stops being persisted
+# as scope text.
+F66=""
+F66_T=$(mktemp -d); mkdir -p "$F66_T/app"
+(cd "$F66_T" && git init -q . >/dev/null 2>&1 && git config user.email t@t && git config user.name t)
+printf 'a\n' > "$F66_T/app/a.py"; printf 'b\n' > "$F66_T/app/b.py"; printf 'c\n' > "$F66_T/app/c.py"
+(cd "$F66_T" && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1)
+(cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" state update active=true workflow_type=code_review_parallel phase=context_init status=DONE >/dev/null 2>&1)
+cat > "$F66_T/lens.yaml" <<'F66EOF'
+lanes:
+  - id: L1
+    scope: core logic
+    files: [app/a.py, app/b.py]
+  - id: L2
+    scope: audit lens
+    files: [app/a.py, app/b.py, app/c.py]
+    lens: true
+F66EOF
+cat > "$F66_T/lens.json" <<'F66EOF'
+{"lanes":[{"id":"L1","scope":"core logic","files":["app/a.py","app/b.py"]},
+          {"id":"L2","scope":"audit lens","files":["app/a.py","app/c.py"],"disjoint":false}]}
+F66EOF
+cat > "$F66_T/plain.yaml" <<'F66EOF'
+lanes:
+  - id: L1
+    scope: alpha
+    files: [app/a.py, app/b.py]
+  - id: L2
+    scope: beta
+    files: [app/a.py, app/c.py]
+F66EOF
+F66_WARN() { (cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from="$1" 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s);console.log(o.overlap_warning?'warn':'quiet')}catch{console.log('err')}});"; }
+# A lens lane shares files by declaration; only two OWNING lanes are a defect.
+[ "$(F66_WARN "$F66_T/lens.yaml")" = "quiet" ] && F66="${F66}lensyaml,"
+[ "$(F66_WARN "$F66_T/lens.json")" = "quiet" ] && F66="${F66}lensjson,"
+[ "$(F66_WARN "$F66_T/plain.yaml")" = "warn" ]  && F66="${F66}lenswarn,"
+# Registration echoes the caller's `scope`/`files` vocabulary, not only the
+# registry's `community`/`file_count` (reading `.scope` returned null for every
+# lane and was reported in the field as "0 lanes registered / files=0").
+F66_VOCAB=$( (cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from="$F66_T/lens.yaml" 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const o=JSON.parse(s),r=(o.registered||[])[0]||{};console.log(r.scope&&r.community&&r.files!=null&&r.file_count!=null?'vocab':'missing')}catch{console.log('err')}});")
+[ "$F66_VOCAB" = "vocab" ] && F66="${F66}vocab,"
+# Read-back: the flag must survive workflow.yaml, or the envelope cannot see it.
+F66_READ=$( (cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const L=JSON.parse(s).lanes||[];const a=L.find(x=>x.id==='L1'),b=L.find(x=>x.id==='L2');console.log(a&&b&&a.lens===false&&b.lens===true?'readback':'dropped')}catch{console.log('err')}});")
+[ "$F66_READ" = "readback" ] && F66="${F66}readback,"
+(cd "$F66_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes --out="$F66_T/env" >/dev/null 2>&1)
+F66_ENV=$(node -e "
+const fs=require('fs'),p='$F66_T/env';
+try{
+  const f=fs.readdirSync(p);
+  const g=n=>fs.readFileSync(p+'/'+n,'utf8');
+  const l1=f.filter(n=>g(n).includes('<lane_id>L1<'))[0], l2=f.filter(n=>g(n).includes('<lane_id>L2<'))[0];
+  const a=g(l1), b=g(l2);
+  const lensOk = !a.includes('<lane_lens>') && b.includes('<lane_lens>');
+  const nbOk = a.includes('own the areas below') && b.includes('own the LOGIC of the areas below');
+  const searchOk = a.includes('<search_discipline>') && b.includes('<search_discipline>');
+  console.log([lensOk?'envlens':'', nbOk?'envneighbors':'', searchOk?'search':''].filter(Boolean).join(','));
+}catch(e){console.log('err')}")
+[ -n "$F66_ENV" ] && [ "$F66_ENV" != "err" ] && F66="${F66}${F66_ENV},"
+rm -rf "$F66_T"
+# Substance gate credits the two markers compose-drilldowns already emits: a
+# filtered-node count (thin because the SUBGRAPH is thin) and the DI-factory-hint
+# variant of the empty marker, whose own text carries parentheses.
+F66_G=$(mktemp -d); mkdir -p "$F66_G/.devt/state" "$F66_G/graphify-out"
+echo '{"graphify":{"enabled":true,"command":"graphify"}}' > "$F66_G/.devt/config.json"
+echo '{"built_at_commit":"abc","nodes":[],"links":[]}' > "$F66_G/graphify-out/graph.json"
+printf 'active: true\nworkflow_id: test\nfirst_created_at: "2026-06-25T00:00:00.000Z"\ngraphify_decision_required: true\n' > "$F66_G/.devt/state/workflow.yaml"
+F66_THIN() { (cd "$F66_G" && node "$ROOT/bin/devt-tools.cjs" state assert-graphify-decision 2>/dev/null) | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(String(JSON.parse(s).thin_drill_down_sections))}catch{console.log('err')}});"; }
+F66_HDR='## Topic Block one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'
+printf '%s\n## Drill-down: A\n_(filtered: noise=32, di_aggregation=1)_\n## Drill-down: B\n_(no direct neighbors found in direction=in; DI factory site: app/x.py (+3 DI-wired edges))_\n## Drill-down: C\n_(no neighbors found in direction=in)_\n' "$F66_HDR" > "$F66_G/.devt/state/graph-impact.md"
+[ "$(F66_THIN)" = "0" ] && F66="${F66}sparse,"
+printf '%s\n## Drill-down: A\ntiny\n## Drill-down: B\ntiny\n## Drill-down: C\n_(no neighbors found in direction=in)_\n' "$F66_HDR" > "$F66_G/.devt/state/graph-impact.md"
+[ "$(F66_THIN)" = "2" ] && F66="${F66}fakestill,"
+rm -rf "$F66_G"
+# --fresh is consumed at substep 0; persisting it puts the flag into the task
+# text that feeds preflight, the memory signal, and taskChanged. --range must
+# survive (partition_lanes reads it back out) and "refresh" must not be mangled.
+F66_STRIP=$(printf '%s' " review auth --fresh --range=a..b " | sed -E 's/ --fresh / /g; s/^ +//; s/ +$//')
+F66_KEEP=$(printf '%s' " review the refresh logic " | sed -E 's/ --fresh / /g; s/^ +//; s/ +$//')
+{ [ "$F66_STRIP" = "review auth --range=a..b" ] && [ "$F66_KEEP" = "review the refresh logic" ] \
+  && /usr/bin/grep -qF 's/ --fresh / /g' "$ROOT/workflows/code-review.md"; } && F66="${F66}freshstrip,"
+F66_OUT="${F66%,}"
+if [ "$F66_OUT" = "lensyaml,lensjson,lenswarn,vocab,readback,envlens,envneighbors,search,sparse,fakestill,freshstrip" ]; then
+  pass "F66: a declared lens lane survives partition-file → registry → workflow.yaml → envelope (and only OWNING lanes trip the disjointness warning), registration answers in the vocabulary it was asked in, a filtered-thin subgraph and a DI-hinted empty one both count as substance while padding still does not, lane briefs ground existence claims in tracked content, and --fresh never reaches the persisted scope"
+else
+  fail "F66: calibration batch regressed — got '$F66_OUT' (want lensyaml,lensjson,lenswarn,vocab,readback,envlens,envneighbors,search,sparse,fakestill,freshstrip)"
 fi
 
 KCORPUS_SHA1=$(KCORPUS_DIGEST)

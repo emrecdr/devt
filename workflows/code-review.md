@@ -115,6 +115,11 @@ Run the compound context-init wrapper ONCE. It performs `init review`, activates
 
 ```bash
 REVIEW_SCOPE="$ARGUMENTS"   # substep 1 — this call is what PERSISTS task to state; later blocks read it back
+# --fresh is consumed at substep 0 and is not scope text. Persisting it puts the
+# flag into workflow.yaml::task, where it reaches the preflight topic query, the
+# memory signal, and every later taskChanged comparison. --range= is deliberately
+# NOT stripped: partition_lanes re-reads it back out of the persisted task.
+REVIEW_SCOPE=$(printf '%s' " ${REVIEW_SCOPE} " | sed -E 's/ --fresh / /g; s/^ +//; s/ +$//')
 CTX=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state review-context-init --scope="${REVIEW_SCOPE}" ${PRIMARY_BRANCH:+--primary-branch=$PRIMARY_BRANCH})
 if [ "$(printf '%s\n' "$CTX" | jq -r '.scope_missing // false')" = "true" ]; then
   echo "⚠️  scope_missing: REVIEW_SCOPE was empty — task/preflight/memory-signal fell back to a literal default. Re-bind from the operator's task text and re-run this substep before continuing."
