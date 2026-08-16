@@ -716,9 +716,10 @@ function assertAutoCuratorConsidered() {
     return {
       ok: false,
       reason:
-        "auto-curator-considered.txt absent — orchestrator skipped the " +
-        "auto_curator step without reading config. Run the auto_curator bash " +
-        "block which writes the marker (SKIP|FIRE|DISABLED status).",
+        "auto-curator-considered.txt absent — the auto_curator step has not " +
+        "recorded a consideration in this workflow window. Run the auto_curator " +
+        "bash block; it writes the marker (SKIP|FIRE|DISABLED) regardless of " +
+        "config outcome.",
     };
   }
   const status = fs.readFileSync(markerPath, "utf8").trim();
@@ -2666,6 +2667,11 @@ function persistGateTrace(name, result) {
       source: "gate_trace",
       gate: name,
       verdict,
+      // Redundant with verdict by design: a consumer's natural first guess
+      // (`.ok`) silently read undefined→falsy on every record, and a field
+      // reader concluded a clean run was failing every gate. warn counts as
+      // ok — same semantics as the gate result it mirrors.
+      ok: verdict !== "fail",
       reason: (result && typeof result.reason === "string") ? result.reason : "",
       workflow_id: workflowId,
       workflow_type: workflowType,
@@ -3324,22 +3330,25 @@ function aggregateKnowledgeCandidates() {
 }
 
 
-// Process-level gate that the orchestrator actually ran `preflight generate`
-// in context_init (vs. silently reusing a brief from a prior workflow). Field
-// observed in the field: orchestrator started a new workflow at
-// 21:29 UTC but preflight-brief.json mtime was 17:29 UTC — 4 hours older than
-// workflow.yaml::created_at. The orchestrator skipped the regenerate step and
-// the stale topic.symbols caused tier=skip → 0 graphify calls.
+// Process-level gate that `preflight generate` has completed for THIS
+// workflow (vs. a brief silently reused from a prior one). Field incident:
+// a workflow started at 21:29 UTC with preflight-brief.json mtime 17:29 UTC —
+// 4 hours older than workflow.yaml::created_at — and the stale topic.symbols
+// caused tier=skip → 0 graphify calls.
 //
 // The gate compares preflight-brief.json mtime against workflow.yaml::created_at.
-// When the brief is older than the workflow start, the orchestrator must have
-// skipped the regenerate — STOP with BLOCKED. When no workflow.yaml exists (no
-// active workflow) OR no brief exists (preflight disabled / failed gracefully),
-// auto-pass: the assertion is about orchestrator obedience, not preflight
-// installation state.
+// An older brief means generate has NOT completed in this window — it does
+// not by itself say WHY: a second field run hit this gate mid-wrapper
+// (review-context-init regenerates the brief internally; a read between the
+// workflow stamp and the regenerate sees the prior brief and self-heals
+// moments later). The reason string is therefore state-shaped, not
+// actor-shaped — a blame-shaped reason on a self-healing transient devalues
+// every other gate message. When no workflow.yaml exists (no active workflow)
+// OR no brief exists (preflight disabled / failed gracefully), auto-pass: the
+// assertion is about generate completion, not preflight installation state.
 //
 // Auto-passes are NOT failures — workflows wire this AFTER preflight generate
-// to catch the orchestrator-skipped-the-call case specifically.
+// to catch the not-regenerated case specifically.
 function assertPreflightFresh() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -3405,7 +3414,10 @@ function assertPreflightFresh() {
       ok: false,
       reason:
         `preflight-brief.json is ${Math.round(ageMs / 1000)}s older than workflow.yaml::created_at ` +
-        `— orchestrator skipped preflight generate in context_init`,
+        `— the brief predates this workflow's start, so preflight generate has not completed ` +
+        `in this window. A read mid-wrapper hits this transiently (review-context-init ` +
+        `regenerates the brief internally — re-check after it returns); a persistent failure ` +
+        `means generate was skipped or died. Run preflight generate to clear it.`,
       brief_mtime: briefMtime.toISOString(),
       workflow_created_at: createdAt.toISOString(),
       age_seconds: Math.round(ageMs / 1000),
@@ -3448,13 +3460,13 @@ function assertClaudeMemHarvest() {
   if (haveHarvest && haveSkipped) {
     return {
       ok: false,
-      reason: "both claude-mem-harvest.md AND claude-mem-skipped.txt exist — mutually exclusive; orchestrator wrote both",
+      reason: "both claude-mem-harvest.md AND claude-mem-skipped.txt exist — the pre-step's two mutually exclusive outcomes are both recorded. Keep the file that reflects what actually happened and delete the other.",
     };
   }
   if (!haveHarvest && !haveSkipped) {
     return {
       ok: false,
-      reason: "neither claude-mem-harvest.md nor claude-mem-skipped.txt exists — orchestrator skipped the claude-mem pre-step in context_init",
+      reason: "neither claude-mem-harvest.md nor claude-mem-skipped.txt exists — the claude-mem pre-step has not recorded an outcome in this workflow window. Run the pre-step in context_init; it writes exactly one of the two.",
     };
   }
   const checkPath = haveHarvest ? harvestPath : skippedPath;

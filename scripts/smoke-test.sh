@@ -6032,8 +6032,8 @@ PFRESH_TMP=$(mktemp -d)
   touch -d "1 hour ago" .devt/state/preflight-brief.json
 )
 STALE_RESULT=$(cd "$PFRESH_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-preflight-fresh)
-if echo "$STALE_RESULT" | jq -e '.ok == false and (.reason | contains("orchestrator skipped"))' >/dev/null 2>&1; then
-  pass "assert-preflight-fresh BLOCKS when brief mtime is well older than workflow.yaml::created_at"
+if echo "$STALE_RESULT" | jq -e '.ok == false and (.reason | contains("predates this workflow"))' >/dev/null 2>&1; then
+  pass "assert-preflight-fresh BLOCKS when brief mtime is well older than workflow.yaml::created_at (state-shaped reason — the gate observes staleness, not who caused it)"
 else
   fail "assert-preflight-fresh failed to detect stale brief (result: $STALE_RESULT)"
 fi
@@ -7356,26 +7356,37 @@ fi
 
 # === v0.60.0 mechanical gates + path-based partition + prose corrections ===
 
-# G1: assert-scope-check-handled (3 sub-gates)
+# G1: assert-scope-check-handled (4 sub-gates). The marker is written
+# UNCONDITIONALLY by scope_check (first token required|not-required), so an
+# absent marker is a real verdict — the step did not run — not an unknown.
+# The pre-fix gate returned ok:true with evidence:"unknown" here: a vacuous
+# pass that made a skipped step and an unmet condition indistinguishable.
 G1_TMP=$(mktemp -d)
 mkdir -p "$G1_TMP/.devt/state" && echo '{}' > "$G1_TMP/.devt/config.json"
 G1A=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
-if echo "$G1A" | jq -e '.ok == true' >/dev/null 2>&1; then
-  pass "G1a: assert-scope-check-handled PASSES when scope-check-required.txt absent (gate does not apply)"
+if echo "$G1A" | jq -e '.ok == false' >/dev/null 2>&1; then
+  pass "G1a: assert-scope-check-handled BLOCKS when scope-check-required.txt absent (step did not run — no more vacuous unknown-pass)"
 else
-  fail "G1a: gate incorrectly fired when no required.txt — got: $G1A"
+  fail "G1a: gate did not block on absent marker — got: $G1A"
 fi
-echo "scope=50 graphify=ready" > "$G1_TMP/.devt/state/scope-check-required.txt"
+echo "not-required scope=3 domains=1 graphify=not_ready" > "$G1_TMP/.devt/state/scope-check-required.txt"
+G1A2=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
+if echo "$G1A2" | jq -e '.ok == true and .evidence == "not-required"' >/dev/null 2>&1; then
+  pass "G1a2: assert-scope-check-handled PASSES with evidence=not-required when the step evaluated and no decision was needed"
+else
+  fail "G1a2: not-required marker did not pass with evidence — got: $G1A2"
+fi
+echo "required reason=offer-bar scope=50 domains=4 graphify=ready" > "$G1_TMP/.devt/state/scope-check-required.txt"
 G1B=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
 if echo "$G1B" | jq -e '.ok == false' >/dev/null 2>&1; then
-  pass "G1b: assert-scope-check-handled BLOCKS when required.txt exists but answer.txt absent"
+  pass "G1b: assert-scope-check-handled BLOCKS when required marker exists but answer.txt absent"
 else
   fail "G1b: gate failed to block on missing answer — got: $G1B"
 fi
 echo "parallel" > "$G1_TMP/.devt/state/scope-check-answer.txt"
 G1C=$(cd "$G1_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled 2>/dev/null)
-if echo "$G1C" | jq -e '.ok == true and .answer == "parallel"' >/dev/null 2>&1; then
-  pass "G1c: assert-scope-check-handled PASSES with answer.txt + returns answer"
+if echo "$G1C" | jq -e '.ok == true and .answer == "parallel" and .evidence == "required"' >/dev/null 2>&1; then
+  pass "G1c: assert-scope-check-handled PASSES with answer.txt + returns answer + evidence=required"
 else
   fail "G1c: gate failed to pass with answer — got: $G1C"
 fi
@@ -14771,49 +14782,44 @@ else
   fail "K177: suggested_reading shape wrong — got: $K177_OUT"
 fi
 
-# K178: the scope_check parallel-offer (relocated to code-review.context-detail.md) has the operator-explicit short-circuit
-# (parallel/single intent in REVIEW_SCOPE text → auto-writes answer, skips
-# redundant AskUserQuestion). Asserts: SCOPE_CHECK_DECISION="parallel"
-# literal exists in workflow.
-# Classifies with the SHIPPED regexes (extracted from the workflow, never
-# copied here — a copy would drift and keep passing) across the cases that
-# matter. The literal-grep this replaces passed while the branch order was
-# inverted: every phrase that DECLINES a fan-out contains the word it declines,
-# so "no parallel" matched the parallel test first and routed the operator into
-# the seven-lane dispatch they had just ruled out — with the AskUserQuestion
-# skipped, so nothing offered a correction. A gate that greps for
-# SCOPE_CHECK_DECISION="parallel" cannot see that; it is present either way.
-K178_RE_P=$(/usr/bin/sed -n "s/^PARALLEL_INTENT_RE=//p" "$ROOT/workflows/code-review.context-detail.md" | head -1 | /usr/bin/sed "s/^'//;s/'$//")
-K178_RE_S=$(/usr/bin/sed -n "s/^SINGLE_INTENT_RE=//p" "$ROOT/workflows/code-review.context-detail.md" | head -1 | /usr/bin/sed "s/^'//;s/'$//")
-# Mirrors the workflow's branch ORDER — single first. If the workflow flips back,
-# the negation cases below fail here.
-K178_FIRST_BRANCH=$(/usr/bin/grep -oE '^(if|elif) echo .*(SINGLE|PARALLEL)_INTENT_RE' "$ROOT/workflows/code-review.context-detail.md" | head -1)
-K178_ORDER_OK=$(printf '%s' "$K178_FIRST_BRANCH" | /usr/bin/grep -c 'SINGLE_INTENT_RE' || true)
+# K178: operator-intent short-circuit — classifies via the SHIPPED classifier
+# (`state scope-intent` CLI, single-sourced in state-lanes.cjs) across the
+# cases that matter. Tests the real code path end-to-end; branch ORDER (single
+# first) is verified behaviorally by the negation cases: every phrase that
+# DECLINES a fan-out contains the word it declines, so a parallel-first test
+# once routed "no parallel" into the seven-lane dispatch the operator had just
+# ruled out — with the AskUserQuestion skipped, so nothing offered a
+# correction. The interior-word cases lock the second field failure: "use
+# multiple devt agents" missed the contiguous `multiple agents` alternative
+# and was silently single-routed; the widening must be SYMMETRIC, or its own
+# negation ("no multiple devt agents") re-inverts one level down.
 k178_classify() {
-  local L; L=$(echo "$1" | tr '[:upper:]' '[:lower:]')
-  if echo "$L" | /usr/bin/grep -qE "$K178_RE_S"; then echo "single"
-  elif echo "$L" | /usr/bin/grep -qE "$K178_RE_P"; then echo "parallel"
-  else echo "ask"; fi
+  node "$ROOT/bin/devt-tools.cjs" state scope-intent --task="$1" 2>/dev/null \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).intent||'ask')}catch{console.log('err')}});"
 }
 K178_BAD=""
 k178_case() { local got; got=$(k178_classify "$1"); [ "$got" = "$2" ] || K178_BAD="$K178_BAD [$1 -> $got, want $2]"; }
 k178_case 'Split this review between multiple agents for parallel running' parallel
+k178_case 'use multiple devt agents to review this branch' parallel
 k178_case 'fan out across community lanes' parallel
 k178_case 'use N agents per-lane' parallel
 k178_case 'review this, no parallel' single
+k178_case 'no multiple devt agents please' single
 k178_case 'single agent, no fan-out please' single
 k178_case 'do not fan out, one reviewer only' single
 k178_case 'without parallel lanes' single
 k178_case 'use a single reviewer' single
 k178_case 'review the branch' ask
 k178_case 'check the auth module for bugs' ask
-K178_OUT=$(/usr/bin/grep -cE 'SCOPE_CHECK_DECISION="parallel"' "$ROOT/workflows/code-review.context-detail.md" 2>/dev/null || echo 0)
-if [ -n "$K178_BAD" ] || [ "$K178_ORDER_OK" != "1" ]; then
-  fail "K178: intent short-circuit misroutes —$K178_BAD${K178_BAD:+ }(single-branch-first=$K178_ORDER_OK, want 1)"
-elif [ "$K178_OUT" -ge "1" ]; then
-  pass "K178: intent short-circuit classifies correctly on all 10 cases incl. negations (no parallel / do not fan out route to SINGLE, not into the fan-out they decline)"
+# The resident scope_check path must actually CALL the classifier — a correct
+# CLI nobody invokes is the half-wired-contract failure mode.
+K178_WIRED=$(/usr/bin/grep -c 'state scope-intent' "$ROOT/workflows/code-review.md" || true)
+if [ -n "$K178_BAD" ]; then
+  fail "K178: intent classifier misroutes —$K178_BAD"
+elif [ "${K178_WIRED:-0}" -ge 1 ]; then
+  pass "K178: scope-intent CLI classifies all 12 cases incl. negations + interior-word forms (use multiple devt agents -> parallel; no multiple devt agents -> single), and scope_check calls it resident"
 else
-  fail "K178: scope_check short-circuit missing — got count: $K178_OUT"
+  fail "K178: scope-intent CLI correct but code-review.md scope_check never calls it (wired=$K178_WIRED)"
 fi
 
 # K179: state mark-claude-mem-skipped CLI writes gate-compliant content format
@@ -18600,7 +18606,7 @@ else
   # (4) disjointness: NO relocated-body sentinel may reappear resident in CRM —
   #     one body-only sentinel per relocated passage so a partial re-inline (which
   #     duplicates content while leaving the pointer) is caught, not just a 2-token spot-check.
-  for SENTINEL in 'STALE-ARCH-SCAN' 'ARCH-SCAN-MISSING' 'arch-scan-report.md::findings' 'recovered_from_noise' 'max-bytes=60000' 'substance-byte-threshold' 'PARALLEL_INTENT_RE' 'cost/value preview: single-dispatch' 'pre-wrote code-review-input.md'; do
+  for SENTINEL in 'STALE-ARCH-SCAN' 'ARCH-SCAN-MISSING' 'arch-scan-report.md::findings' 'recovered_from_noise' 'max-bytes=60000' 'substance-byte-threshold' 'cost/value preview: single-dispatch' 'pre-wrote code-review-input.md'; do
     /usr/bin/grep -qF -- "$SENTINEL" "$CRM" && { K309_OK=0; K309_WHY="resident-body:${SENTINEL}"; }
   done
 fi
@@ -19641,11 +19647,13 @@ K344_H=$( (cd "$K344_TMP" && node "$CLI" state lane-severity-tally 2>/dev/null) 
 rm -rf "$K344_TMP"
 # i — the split alternative tolerates interior words, so routing no longer rests
 # on the `multiple agents` alternative alone; a plain review still no-matches so
-# the offer bar (and the AskUserQuestion) still decides.
-K344_I_RE=$(/usr/bin/grep -m1 "^PARALLEL_INTENT_RE=" "$ROOT/workflows/code-review.context-detail.md" | sed "s/^PARALLEL_INTENT_RE='//; s/'\$//")
+# the offer bar (and the AskUserQuestion) still decides. Classifies via the
+# shipped `state scope-intent` CLI (the single source since the short-circuit
+# moved resident).
 K344_I=0
-if echo "split this review between multiple systems" | /usr/bin/grep -qE "$K344_I_RE" \
-   && ! echo "review the auth module carefully" | /usr/bin/grep -qE "$K344_I_RE" \
+K344_I_A=$(node "$ROOT/bin/devt-tools.cjs" state scope-intent --task="split this review between multiple systems" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).intent||'null')}catch{console.log('err')}});")
+K344_I_B=$(node "$ROOT/bin/devt-tools.cjs" state scope-intent --task="review the auth module carefully" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(s).intent||'null')}catch{console.log('err')}});")
+if [ "$K344_I_A" = "parallel" ] && [ "$K344_I_B" = "null" ] \
    && /usr/bin/grep -q "no-match branch, not a default-to-single branch" "$ROOT/workflows/code-review.context-detail.md"; then K344_I=1; fi
 if [ "$K344_A" = "app/c.py" ] && [ "$K344_B" = "true" ] && [ "$K344_C" = "1" ] && [ "$K344_D" = "0" ] && [ "$K344_E" = "1" ] && [ "$K344_F" = "1" ] && [ "$K344_G" = "1" ] && [ "$K344_H" = "1" ] && [ "$K344_I" = "1" ]; then
   pass "K344: lane coverage set-difference names unassigned files and stays silent when complete, the list rides the consolidator envelope, every review-context-init call site binds its scope, an empty scope is reported not absorbed, curation escalation re-fires on multiplier crossing, a zero rescue-harvest says where the candidates are, lane sidecars are the primary severity basis with the self-report kept as a named cross-check, and parallel-intent no longer rests on one alternative"
@@ -19680,6 +19688,43 @@ if [ "$K346_A" = "light" ] && [ "$K346_B" = "suppressed" ] && [ "$K346_C" = "1" 
   pass "K346: review-weight advise emits the light-eligible line, suppresses it on thoroughness intent, and the workflow calls it instead of re-running the compound bundle to hand-assemble flags"
 else
   fail "K346: review-weight advise regressed — light=$K346_A (want light), intent-suppression=$K346_B (want suppressed), workflow-calls-advise=$K346_C (want 1)"
+fi
+
+# K347: gates-that-mislead-about-their-own-state batch (field-report closures).
+#   a  gate-trace.jsonl records carry a boolean `ok` agreeing with `verdict` —
+#      a consumer's natural first guess (`.ok`) read undefined→falsy on every
+#      record and a field reader concluded a clean run failed every gate. The
+#      leg also locks the scope-check flip: with the vacuous unknown-pass
+#      reverted, the first read below records verdict=ok and the leg goes red.
+#   b  no blame-shaped `orchestrator skipped` reasons remain in bin/modules —
+#      a gate observes STATE (file absent / mtime older); asserting WHO failed
+#      misled a field operator mid-wrapper and devalued every other message.
+#   c  scope_check records its evaluation unconditionally — the `not-required`
+#      branch exists in the resident bash, which is what gives
+#      assert-scope-check-handled a real skipped-step verdict.
+#   d  operator-parallel routes through DELEGATE mode in both files — the
+#      short-circuit is heard on every run, not only above the offer bar.
+K347_TMP=$(mktemp -d)
+mkdir -p "$K347_TMP/.devt/state" && echo '{}' > "$K347_TMP/.devt/config.json"
+(cd "$K347_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled >/dev/null 2>&1)
+K347_A1=$(tail -1 "$K347_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.verdict==='fail'&&j.ok===false?'1':'0')}catch{console.log('err')}});")
+echo "not-required scope=2 domains=1 graphify=not_ready" > "$K347_TMP/.devt/state/scope-check-required.txt"
+(cd "$K347_TMP" && node "$ROOT/bin/devt-tools.cjs" state assert-scope-check-handled >/dev/null 2>&1)
+K347_A2=$(tail -1 "$K347_TMP/.devt/state/gate-trace.jsonl" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{try{const j=JSON.parse(s);console.log(j.verdict==='ok'&&j.ok===true?'1':'0')}catch{console.log('err')}});")
+rm -rf "$K347_TMP"
+# Brace-group defuse (CON-003): grep exits 1 precisely when the sweep is CLEAN
+# — zero matches is the success condition, and under pipefail a bare pipeline
+# would abort the suite the moment the fix works.
+K347_B=$({ /usr/bin/grep -rc 'orchestrator skipped' "$ROOT/bin/modules/" 2>/dev/null || true; } | awk -F: '{s+=$2} END{print s+0}')
+K347_C=0
+if /usr/bin/grep -q 'not-required scope=' "$ROOT/workflows/code-review.md"; then K347_C=1; fi
+K347_D=0
+if /usr/bin/grep -q 'DELEGATE mode' "$ROOT/workflows/code-review.md" \
+   && /usr/bin/grep -q 'DELEGATE mode' "$ROOT/workflows/code-review.context-detail.md"; then K347_D=1; fi
+if [ "$K347_A1" = "1" ] && [ "$K347_A2" = "1" ] && [ "$K347_B" = "0" ] && [ "$K347_C" = "1" ] && [ "$K347_D" = "1" ]; then
+  pass "K347: gate-trace records carry ok agreeing with verdict (fail->false, ok->true), no blame-shaped orchestrator-skipped reasons remain in bin/modules, scope_check records not-required unconditionally, and operator-parallel routes through DELEGATE mode"
+else
+  fail "K347: misleading-gate batch regressed — trace-fail-ok=$K347_A1 (want 1), trace-pass-ok=$K347_A2 (want 1), blame-shaped-count=$K347_B (want 0), unconditional-marker=$K347_C (want 1), delegate-mode-wired=$K347_D (want 1)"
 fi
 
 # K345: the guard-cries-wolf batch. A guard that reports a problem on a correct

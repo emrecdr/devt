@@ -474,8 +474,8 @@ const STATE_FILE_CONTRACT = {
     "preflight-brief.json",     // JSON sidecar for preflight-brief.md (no routing — input-only)
     "weekly-report.md",         // output of `devt-tools report generate` — weekly contributor + commit summary
     "review.md", "code-review-input.md",
-    "scope-check-required.txt", // marker written when >10-file + graphify-ready gate fires
-    "scope-check-answer.txt",   // orchestrator writes user's parallel/single/cancel choice
+    "scope-check-required.txt", // scope_check's unconditional evaluation record (first token required|not-required) — absence means the step did not run
+    "scope-check-answer.txt",   // parallel/single/cancel decision (operator-intent short-circuit or AskUserQuestion answer)
     "review-depth.txt",         // diff-LOC banding (standard|chunked + measured LOC) written at scope_check; reset-soft evicted
     "dispatch-stamps.jsonl",    // render-time dispatch-intent stamps (cid + ts) — provenance evidence for assert-consolidator-dispatched; reset-soft evicted
     "consolidator-ran.txt",     // marker written by consolidator synthesis entry (assert-consolidator-dispatched)

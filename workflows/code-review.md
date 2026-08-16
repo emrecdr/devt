@@ -348,14 +348,35 @@ echo "scope_check: file_count=${SCOPE_FILE_COUNT}, diff_loc=${DIFF_LOC}, graphif
 # value proven at 20 files with >=3 domains (a 10-file lane carried 2
 # Importants a single reviewer would have skimmed).
 DOMAIN_COUNT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state changed-files ${PRIMARY_BRANCH:+--base=$PRIMARY_BRANCH} 2>/dev/null | jq -r '.files[]?' | awk -F/ '{ if (NF >= 3) print $1"/"$2; else if (NF == 2) print $1; else print "root" }' | sort -u | /usr/bin/grep -cE '.' || echo 1)
-if { [ "${SCOPE_FILE_COUNT:-0}" -gt 15 ] || { [ "${SCOPE_FILE_COUNT:-0}" -gt 10 ] && [ "${DOMAIN_COUNT:-1}" -ge 3 ]; }; } && [ "${GRAPHIFY_STATE:-not_ready}" = "ready" ]; then
-  echo "scope=${SCOPE_FILE_COUNT} domains=${DOMAIN_COUNT} graphify=ready" > .devt/state/scope-check-required.txt
+# Operator intent outranks the offer bar: an explicit parallel/single in the
+# task text is an ANSWERED question, honored on every run. A field run asked
+# for "multiple devt agents" below the bar and was silently single-routed —
+# the intent check lived behind the very bar it existed to override. The bar
+# only decides when the operator has not spoken. Empty --task falls back to
+# the persisted workflow.yaml task inside the CLI.
+INTENT=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state scope-intent --task="${REVIEW_SCOPE}" 2>/dev/null | jq -r '.intent // empty')
+# scope_check ALWAYS records its evaluation — the `not-required` marker is
+# what lets assert-scope-check-handled tell a skipped step from an unmet
+# condition (absence now means the step did not run, full stop).
+if [ -n "$INTENT" ]; then
+  echo "required reason=operator-intent scope=${SCOPE_FILE_COUNT} domains=${DOMAIN_COUNT} graphify=${GRAPHIFY_STATE}" > .devt/state/scope-check-required.txt
+  echo "$INTENT" > .devt/state/scope-check-answer.txt
+  echo "[scope_check] operator-explicit intent: ${INTENT} — task text already answers the parallel question; AskUserQuestion skipped"
+elif { [ "${SCOPE_FILE_COUNT:-0}" -gt 15 ] || { [ "${SCOPE_FILE_COUNT:-0}" -gt 10 ] && [ "${DOMAIN_COUNT:-1}" -ge 3 ]; }; } && [ "${GRAPHIFY_STATE:-not_ready}" = "ready" ]; then
+  echo "required reason=offer-bar scope=${SCOPE_FILE_COUNT} domains=${DOMAIN_COUNT} graphify=ready" > .devt/state/scope-check-required.txt
+else
+  echo "not-required scope=${SCOPE_FILE_COUNT} domains=${DOMAIN_COUNT} graphify=${GRAPHIFY_STATE}" > .devt/state/scope-check-required.txt
 fi
 ```
 
-If the offer bar was NOT crossed (no `scope-check-required.txt` written) OR `GRAPHIFY_STATE != "ready"`: skip the AskUserQuestion and continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope grows without graphify.
+Route on what the step just recorded:
 
-**Parallel-offer branch (conditional).** If `scope-check-required.txt` was written (offer bar crossed: >15 files, or >10 spanning ≥3 domains) AND `GRAPHIFY_STATE == "ready"`: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## parallel-offer` section — operator-intent short-circuit, cost/value preview, AskUserQuestion, then the answer artifact + routing (parallel → pre-write the scope artifact and delegate to `code-review-parallel.md`; single → continue to identify_scope; cancel → STOP with BLOCKED). The section ends with `.devt/state/scope-check-answer.txt` written — `state assert-scope-check-handled` gates the next step on it. The common path (offer bar not crossed, or graphify not ready) never loads this.
+- **`not-required` marker** (no operator intent; offer bar not crossed, or graphify not ready): continue to identify_scope (single-dispatch path). The community-filter is the canonical fallback when scope grows without graphify. The common path never loads the detail file.
+- **Operator intent `single`**: continue to identify_scope — the answer artifact is already written.
+- **Operator intent `parallel`**: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.context-detail.md` and execute its `## parallel-offer` section in DELEGATE mode — skip the cost preview + AskUserQuestion (the answer artifact is already written) and run only the delegation tail (pre-write the scope artifact, then delegate to `code-review-parallel.md`). Any graphify state is fine here: `partition_lanes` self-selects community / service-boundary / path partition.
+- **`required reason=offer-bar` marker** (bar crossed, no operator intent): Read the same file and execute its `## parallel-offer` section in ASK mode — cost/value preview, AskUserQuestion, answer artifact, then routing (parallel → delegation tail; single → continue to identify_scope; cancel → STOP with BLOCKED).
+
+`state assert-scope-check-handled` gates the next step on the marker + answer artifacts.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state update phase=scope_check status=DONE

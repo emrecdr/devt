@@ -139,6 +139,9 @@ node bin/devt-tools.cjs state refresh-scope-context
 
 node bin/devt-tools.cjs state changed-files [--base=<ref>]
 # Canonical review scope file list: union of committed range (merge-base-aware base...HEAD) + working tree (staged + unstaged) + untracked, via review-weight's collectChangedFiles. Returns {ok, base, count, files[]}. --base defaults to .devt/config.json::git.primary_branch, then "main". Consumed by code-review.md scope_check + identify_scope — raw `git diff base...HEAD` returns an EMPTY set exactly when the review target is uncommitted work, which silently under-scoped reviews
+
+node bin/devt-tools.cjs state scope-intent [--task="<text>"]
+# Operator parallel/single intent classifier for review routing. Returns {ok, intent: "parallel"|"single"|null, matched}. Single-intent phrases are tested FIRST (every fan-out refusal contains the word it declines); both regexes tolerate bounded interior words ("use multiple devt agents", "no multiple devt agents"). Omitted/empty --task falls back to the persisted workflow.yaml::task. null intent means the offer bar decides and, if crossed, the operator MUST be asked. Resident in code-review.md scope_check so explicit intent is honored on every run, not only above the offer bar
 ```
 
 ### Multi-instance isolation

@@ -131,6 +131,7 @@ const {
   assertClaudeMemHarvest,
 } = require("./state-gates.cjs");
 const {
+  detectScopeIntent,
   slugifyLaneName,
   listLaneOutputs, laneSeverityTally, laneSampleForVerification, partitionLanes,
   snapshotLanes, assertLanesUnchanged,
@@ -1787,6 +1788,21 @@ function run(subcommand, args) {
       const files = collectChangedFiles(findProjectRoot(), base, range ? { range } : undefined);
       return { ok: true, base, range: range || null, count: files.length, files };
     }
+    case "scope-intent": {
+      // Operator parallel/single intent in the review task text. Falls back
+      // to the persisted workflow.yaml::task when --task is omitted or empty —
+      // the persisted task is the authoritative record of what the operator
+      // asked for (in-shell copies can be reworded or truncated).
+      const taskArg = args.find(a => a.startsWith("--task="));
+      let task = taskArg ? taskArg.slice("--task=".length) : "";
+      if (!task.trim()) {
+        try {
+          const st = parseSimpleYaml(fs.readFileSync(getWorkflowPath(), "utf8"));
+          task = (st && st.task) || "";
+        } catch { /* no active workflow — classify empty, returns null intent */ }
+      }
+      return { ok: true, ...detectScopeIntent(task) };
+    }
     case "review-context-init": {
       const scopeArg = args.find(a => a.startsWith("--scope="));
       const branchArg = args.find(a => a.startsWith("--primary-branch="));
@@ -2070,7 +2086,7 @@ function run(subcommand, args) {
     }
     default:
       throw new Error(
-        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, stop-hook, reactivate, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, snapshot-lanes, assert-lanes-unchanged, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, lane-severity-tally, lane-sample, partition-lanes, changed-files, history`,
+        `Unknown state subcommand: ${subcommand}. Use: read, read-section, read-sidecar, truncate-artifact, update, reset, reset-soft, staleness-check, auto-reset-if-stale, graphify-roi, disk-check, compute-impact-plan, review-context-init, workflow-context-init, mark-claude-mem-skipped, release, validate, sync, prune, audit, cleanup, evict-graphify, evict-workflow-artifacts, assert-graphify-decision, assert-preflight-fresh, assert-claude-mem-harvest, check-agent-output, assert-verifier-ran, assert-verifier-short-circuit, assert-verifier-graded-all-axes, assert-scope-check-handled, assert-lanes-registered, assert-consolidator-dispatched, assert-auto-curator-considered, assert-reuse-analyzed, assert-knowledge-candidates-tagged, assert-preflight-semantic-quality, assert-no-raw-dispatches-this-session, assert-dispatch-warnings-acknowledged, aggregate-knowledge-candidates, derive-reuse-candidates, refresh-scope-context, assert-artifact-present, assert-claim-checks-resolved, recover-partial-impl, post-dispatch-check, finalize-gates, stop-hook, reactivate, check-inherited-edits, assert-file-quiescent, assert-lanes-quiesced, snapshot-lanes, assert-lanes-unchanged, council-trace, assert-council-not-recent, council-validation-material, assert-advisor-diversity, assert-council-budget, arch-scan-trace, assert-arch-scan-fresh, assert-all, assert-wired, assert-scope-complete, autoskill-rej-check, assert-graphify-source-tagged, graphify-fallback-trace, new-instance, list-instances, advance-phase, list-lane-outputs, update-lane, register-lane, register-lanes, lane-severity-tally, lane-sample, partition-lanes, changed-files, scope-intent, history`,
       );
   }
 }

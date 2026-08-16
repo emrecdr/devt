@@ -1453,7 +1453,42 @@ function updateLane(laneId, kvPairs) {
   return { ok: true, lane_id: laneId, updates };
 }
 
+// Operator-intent classifier for the scope_check routing decision. When the
+// task text already declares parallel/single intent, that is an ANSWERED
+// question — the workflow honors it on every run instead of re-asking. This
+// runs on the resident path in code-review.md::scope_check: a field run asked
+// for "multiple devt agents" below the offer bar and was silently
+// single-routed, because the check lived behind the very bar it existed to
+// override.
+//
+// SINGLE is tested FIRST, and the order is load-bearing: every phrase that
+// declines a fan-out contains the word it declines ("no parallel", "do not
+// fan out"), so a parallel-first test matched the substring inside the
+// refusal and routed the operator into the exact thing they ruled out —
+// with the AskUserQuestion skipped, so nothing offered a correction. Single
+// phrases are all specific; a bare "parallel" substring is not. The residual
+// collateral ("run in parallel, not a single agent" reads as single) is rare
+// and fails toward the cheaper dispatch — the review still happens.
+//
+// Interior-word tolerance: operators write "split this review between
+// multiple agents" and "use multiple devt agents", not the contiguous
+// phrases — both the split and multiple…agents alternatives allow a bounded
+// same-sentence gap. Spelling tolerance is deliberately NOT added ("paralel"
+// missed once; chasing misspellings is unbounded over-fitting). The real
+// safety net is the null return: an undetected intent must ASK, never guess.
+const SINGLE_INTENT_RE = /(single (dispatch|agent|reviewer)|one[ -]reviewer|(no|not|without|avoid|dont|don.t)[^.]{0,24}(parallel|fan[ -]out|lanes|multiple[^.]{0,24}agents))/;
+const PARALLEL_INTENT_RE = /(parallel|split[^.]{0,30}(multiple|several)|per-lane|fan[ -]out|multiple[^.]{0,24}agents|n agents|community lanes)/;
+
+function detectScopeIntent(taskText) {
+  const text = String(taskText || "").toLowerCase();
+  if (!text.trim()) return { intent: null, matched: null };
+  if (SINGLE_INTENT_RE.test(text)) return { intent: "single", matched: "single_intent" };
+  if (PARALLEL_INTENT_RE.test(text)) return { intent: "parallel", matched: "parallel_intent" };
+  return { intent: null, matched: null };
+}
+
 module.exports = {
+  detectScopeIntent,
   laneSeverityTally,
   snapshotLanes,
   assertLanesUnchanged,

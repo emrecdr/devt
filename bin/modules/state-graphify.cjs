@@ -176,7 +176,7 @@ function assertGraphifyDecision() {
     return {
       ok: false,
       reason:
-        "neither graph-impact.md nor graphify-skip-reason.txt exists — orchestrator skipped the graphify decision step in context_init",
+        "neither graph-impact.md nor graphify-skip-reason.txt exists — the graphify decision step has not recorded an outcome in this workflow window (an active run writes graph-impact.md; a skip writes graphify-skip-reason.txt). Run the decision step in context_init before proceeding.",
       graphify_state: "ready",
     };
   }
@@ -1213,17 +1213,21 @@ function contextInitScopeSig(primaryBranch) {
 }
 
 
-// Mechanical gate for code-review.md::scope_check. When the scope_check
-// bash detects scope > 10 files AND graphify=ready, it writes
-// .devt/state/scope-check-required.txt. The next step (identify_scope)
-// must verify either:
-//   - .devt/state/scope-check-answer.txt exists (orchestrator wrote the
-//     AskUserQuestion answer)
-//   - OR .devt/state/scope-check-required.txt does NOT exist (condition
-//     didn't match; gate doesn't apply)
+// Mechanical gate for code-review.md::scope_check. The step records its
+// evaluation to .devt/state/scope-check-required.txt UNCONDITIONALLY — first
+// token `required` (operator intent detected, or offer bar crossed) or
+// `not-required` (neither). That unconditional write is what gives this gate
+// a third verdict: an absent marker used to be unreadable (a skipped step and
+// an unmet condition looked identical, so the gate passed with
+// evidence:"unknown" — a vacuous pass), whereas now absence means the step
+// did not run. `required` demands the decision artifact
+// (scope-check-answer.txt: parallel|single|cancel), written either by the
+// operator-intent short-circuit or by the AskUserQuestion.
 // Why a mechanical gate: orchestrators can skip the AskUserQuestion silently
 // with rationalizations like "user pre-stated parallel intent." Prose-only
 // gates don't survive this; this gate forces the answer artifact to exist.
+// Content tolerance: any marker whose first token is not `not-required` is
+// treated as `required` — the demanding direction.
 function assertScopeCheckHandled() {
   const dir = getStateDir();
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
@@ -1231,16 +1235,38 @@ function assertScopeCheckHandled() {
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
   const answerPath = path.join(dir, "scope-check-answer.txt");
   if (!fs.existsSync(requiredPath)) {
-    return { ok: true, warn: true, evidence: "unknown", reason: "scope-check-required.txt absent — the marker is written BY the step under audit, so a skipped step and an unmet condition look identical here" };
+    return {
+      ok: false,
+      reason:
+        "scope-check-required.txt absent — scope_check records its evaluation " +
+        "unconditionally (required OR not-required), so an absent marker means " +
+        "the step has not run in this workflow window. Run scope_check before " +
+        "identify_scope.",
+    };
+  }
+  const markerFreshness = isArtifactFresh(requiredPath);
+  if (!markerFreshness.fresh) {
+    return {
+      ok: false,
+      reason: `${markerFreshness.reason} — scope-check-required.txt may be from a prior workflow; re-run scope_check`,
+      artifact_mtime: markerFreshness.artifact_mtime,
+      workflow_created_at: markerFreshness.workflow_created_at,
+      age_seconds: markerFreshness.age_seconds,
+    };
+  }
+  const marker = fs.readFileSync(requiredPath, "utf8").trim();
+  if (/^not-required\b/.test(marker)) {
+    return { ok: true, evidence: "not-required", marker };
   }
   if (!fs.existsSync(answerPath)) {
     return {
       ok: false,
       reason:
-        "scope-check-required.txt exists but scope-check-answer.txt absent — " +
-        "orchestrator skipped the AskUserQuestion. Either ask the user " +
-        "(parallel vs single-dispatch) and write the answer to " +
-        ".devt/state/scope-check-answer.txt, or set autonomous-mode override.",
+        "scope-check-required.txt records a decision as required but " +
+        "scope-check-answer.txt is absent — the parallel-vs-single choice has " +
+        "not been recorded in this workflow window. Ask the user (or apply the " +
+        "operator's explicit intent) and write parallel|single|cancel to " +
+        ".devt/state/scope-check-answer.txt.",
     };
   }
   const answer = fs.readFileSync(answerPath, "utf8").trim();
@@ -1254,7 +1280,7 @@ function assertScopeCheckHandled() {
       age_seconds: freshness.age_seconds,
     };
   }
-  return { ok: true, answer };
+  return { ok: true, evidence: "required", answer };
 }
 
 

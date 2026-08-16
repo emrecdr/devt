@@ -34,48 +34,11 @@ Loaded from substep 6 only when a drill-down response comes back anomalous (empt
 
 ## parallel-offer
 
-Entered from code-review.md::scope_check ONLY when the offer bar is crossed (>15 files, or >10 files spanning ≥3 domains) AND `GRAPHIFY_STATE == "ready"`. Ends with `.devt/state/scope-check-answer.txt` written (`parallel` | `single` | `cancel`) — the mechanical signal `state assert-scope-check-handled` requires.
+Entered from code-review.md::scope_check in one of two modes. **ASK mode**: the offer bar is crossed (>15 files, or >10 files spanning ≥3 domains), `GRAPHIFY_STATE == "ready"`, and `state scope-intent` found no operator intent — run everything below. **DELEGATE mode**: the operator's task text already said `parallel` (scope_check wrote `scope-check-answer.txt` before loading this) — skip straight to "first pre-write the scope artifact, THEN delegate". Either way the section ends with `.devt/state/scope-check-answer.txt` in place (`parallel` | `single` | `cancel`) — the mechanical signal `state assert-scope-check-handled` requires.
 
 > **Pre-known partition shortcut:** If you already know the right lane partition before this workflow runs (e.g., 7 domain lanes for a multi-service PR), skip the auto-partitioner entirely and use the formal lane-registration path: `node bin/devt-tools.cjs state register-lanes --from=<lanes.yaml>` followed by `node bin/devt-tools.cjs dispatch render-lanes` to emit paste-ready envelopes carrying the canonical rubric self-grade directive + scope blocks. Each rendered envelope carries a `<correlation_id>cid_<workflow_id_prefix>_<lane_id></correlation_id>` tag that `dispatch-hygiene-guard.sh` recognizes — preserve this short tag in your dispatch prompt (even when customizing other envelope content) to silence `raw_dispatch` warnings on registered-lane dispatches. The matcher is content-based: any one of the recognized envelope tags (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<context>`, `<graph_impact>`, `<correlation_id>cid_*`, etc.) is sufficient. This avoids the bypass-pattern where long sessions accumulate unbounded raw-dispatch counts.
 
-**Operator-explicit short-circuit:** When the task text in `REVIEW_SCOPE` already declares parallel/single intent (e.g. operator typed "split across multiple agents for parallel review" or "single dispatch only"), asking the AskUserQuestion is re-asking an answered question. Pre-detect the intent and auto-write the answer:
-
-```bash
-# The split alternative allows interior words: operators write "split this
-# review between multiple agents", not the contiguous "split between multiple".
-# Field near-miss: that phrasing matched on the `multiple agents` alternative
-# alone, so one alternative carried the whole routing decision. Spelling
-# tolerance is deliberately NOT added — "paralel" missed and chasing
-# "parralel"/"paralell" is unbounded over-fitting. The real safety net is the
-# else branch: an undetected intent must ASK, never guess.
-PARALLEL_INTENT_RE='(parallel|split[^.]{0,30}(multiple|several)|per-lane|fan[ -]out|multiple agents|N agents|community lanes)'
-SINGLE_INTENT_RE='(single (dispatch|agent|reviewer)|one[ -]reviewer|(no|not|without|avoid|dont|don.t)[^.]{0,24}(parallel|fan[ -]out|lanes|multiple agents))'
-SCOPE_LOWER=$(echo "${REVIEW_SCOPE}" | tr '[:upper:]' '[:lower:]')
-# SINGLE is tested FIRST, and the order is the whole fix. Every phrase that
-# declines a fan-out contains the word it declines — "no parallel", "do not fan
-# out" — so a parallel-first test matched the substring inside the refusal and
-# routed the operator into the exact thing they ruled out. Worse than a wrong
-# guess: this branch SKIPS the AskUserQuestion, so there was no correction step.
-# Single phrases are all specific; a bare "parallel" substring is not. The
-# residual collateral ("run in parallel, not a single agent" reads as single) is
-# rare and fails toward the cheaper dispatch — the review still happens.
-if echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${SINGLE_INTENT_RE}"; then
-  echo "single" > .devt/state/scope-check-answer.txt
-  echo "[scope_check] operator-explicit short-circuit: single intent detected in task text — skipping AskUserQuestion"
-  SCOPE_CHECK_DECISION="single"
-elif echo "${SCOPE_LOWER}" | /usr/bin/grep -qE "${PARALLEL_INTENT_RE}"; then
-  echo "parallel" > .devt/state/scope-check-answer.txt
-  echo "[scope_check] operator-explicit short-circuit: parallel intent detected in task text — skipping AskUserQuestion"
-  SCOPE_CHECK_DECISION="parallel"
-else
-  SCOPE_CHECK_DECISION=""
-  echo "[scope_check] no explicit parallel/single intent in task text — the offer bar decides, and if crossed the operator MUST be asked (do not infer a default)"
-fi
-```
-
-If `SCOPE_CHECK_DECISION` is set, skip the AskUserQuestion block and proceed to the chosen path (parallel → delegate to `code-review-parallel.md`; single → continue to identify_scope).
-
-If the offer bar was crossed AND `GRAPHIFY_STATE == "ready"` AND `SCOPE_CHECK_DECISION` is empty: compute the cost/value preview, then ask the user. **An empty `SCOPE_CHECK_DECISION` with the offer bar crossed is precisely when AskUserQuestion must fire** — it is the no-match branch, not a default-to-single branch. The short-circuit above exists to avoid re-asking an *answered* question; silently picking a path when the regex found nothing is the opposite failure, and the more expensive one, because a near-miss then routes the review without the operator ever seeing a choice.
+**ASK mode:** compute the cost/value preview, then ask the user. The operator-intent classifier (`state scope-intent`, resident in scope_check so it runs on every review, not only above the bar) already found nothing — and reaching this mode with no intent is precisely when AskUserQuestion must fire. It is the no-match branch, not a default-to-single branch: the resident short-circuit exists to avoid re-asking an *answered* question; silently picking a path when the classifier found nothing is the opposite failure, and the more expensive one, because a near-miss then routes the review without the operator ever seeing a choice.
 
 **Cost preview with value caveat — NEVER present cost alone.** A naked cost number systematically biases toward false economy on exactly the reviews where fan-out pays (field case: the "expensive" parallel run was the one that caught two cross-lane Criticals a single pass would plausibly have missed). The preview pairs a rough banded estimate with the coverage signal:
 
@@ -107,7 +70,7 @@ echo "${USER_CHOICE}" > .devt/state/scope-check-answer.txt
 
 If the user chose `cancel`, STOP with BLOCKED. If `parallel`, proceed to the parallel delegation path. If `single`, continue to identify_scope (single-dispatch).
 
-If user picks YES (parallel): **first pre-write the scope artifact, THEN delegate.** scope_check runs BEFORE identify_scope would write `.devt/state/code-review-input.md`, and the parallel workflow's `partition_lanes` reads it — writing it here (from the same changed-files union scope_check measured) means the parallel path has its scope on entry. `partition_lanes` also self-recovers if it's somehow still absent, but pre-writing keeps that a genuine-anomaly path (loud warning fires only when the handoff really broke, not on every fresh run):
+If the answer is `parallel` (user choice in ASK mode, or the operator-intent answer scope_check pre-wrote in DELEGATE mode): **first pre-write the scope artifact, THEN delegate.** scope_check runs BEFORE identify_scope would write `.devt/state/code-review-input.md`, and the parallel workflow's `partition_lanes` reads it — writing it here (from the same changed-files union scope_check measured) means the parallel path has its scope on entry. `partition_lanes` also self-recovers if it's somehow still absent, but pre-writing keeps that a genuine-anomaly path (loud warning fires only when the handoff really broke, not on every fresh run):
 
 ```bash
 if [ ! -s .devt/state/code-review-input.md ]; then
@@ -129,4 +92,4 @@ fi
 
 Then delegate to `workflows/code-review-parallel.md` by Read-ing that file and following its steps starting from `context_init`. The cached workflow.yaml state (workflow_id, memory_signal, scope_hint, scope_trust) carries over — the parallel workflow re-reads it.
 
-If user picks NO: continue to identify_scope (existing single-dispatch path; the code-reviewer agent's community-filter logic handles scope > 10 files automatically).
+If the answer is `single`: continue to identify_scope (existing single-dispatch path; the code-reviewer agent's community-filter logic handles scope > 10 files automatically).
