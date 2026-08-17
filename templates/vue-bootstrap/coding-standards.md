@@ -272,4 +272,10 @@ document.getElementById('closeBtn').click()
 - Locale files: `src/assets/locales/*.json`
 - Supported locales: en, es, fr, de, it, nl, tr
 
+## Version Selection & Upgrades
+
+- **New dependencies** (libraries, dev tools, CI actions): adopt the latest stable release at the time of introduction.
+- **Core language toolchain** (compiler / interpreter / runtime): never adopt an x.y.0 initial release — wait 3–4 weeks after release and target x.y.1 or the first patch in that window. If the current x.y.0 is younger than that, stay on the previous stable line and note the pending upgrade.
+- **Existing dependencies**: upgrades are suggest-only — surface the suggestion (current → available, and why it matters); never bump automatically or as a side effect of unrelated work. The operator decides when.
+
 > **ADR override note**: if a project ADR in `.devt/memory/decisions/` contradicts these standards, the ADR wins. ADRs are constitutional. Run `node bin/devt-tools.cjs memory list decision` to see what's binding.

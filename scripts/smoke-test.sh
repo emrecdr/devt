@@ -19388,6 +19388,25 @@ else
   fail "K336: canonical One-Way rule missing from:$K336_MISSING — language-agnostic rules must align across every template (add the rule, don't leave the set uneven)"
 fi
 
+# K348: the version-selection policy stays aligned across ALL templates'
+# coding-standards.md (same drift class K336 guards for golden rules). Two
+# load-bearing sentences, both anchored: the toolchain x.y.0 embargo (adopt
+# latest stable for deps, but never a fresh language release) and the
+# suggest-only upgrade contract (agents surface upgrade suggestions; they do
+# not bump existing dependencies automatically or as a side effect).
+K348_A1="never adopt an x.y.0 initial release"
+K348_A2="upgrades are suggest-only"
+K348_MISSING=""
+for csf in "$ROOT"/templates/*/coding-standards.md; do
+  /usr/bin/grep -qF "$K348_A1" "$csf" || K348_MISSING="$K348_MISSING $(echo "$csf" | sed "s|$ROOT/||"):toolchain-embargo"
+  /usr/bin/grep -qF "$K348_A2" "$csf" || K348_MISSING="$K348_MISSING $(echo "$csf" | sed "s|$ROOT/||"):suggest-only"
+done
+if [ -z "$K348_MISSING" ]; then
+  pass "K348: version-selection policy (latest-stable adoption, x.y.0 toolchain embargo, suggest-only upgrades) aligned across all 6 templates' coding-standards.md"
+else
+  fail "K348: version-selection policy missing from:$K348_MISSING — align the rule across every template (don't leave the set uneven)"
+fi
+
 echo
 # K342: loop closure + fail-closed defaults (task-service field batch).
 #   a  no workflow substitutes a SUCCESS-shaped default for a crashed CLI. Two

@@ -113,6 +113,12 @@ Result conventions:
 - Library crates should minimize `unsafe`; consider `#![forbid(unsafe_code)]` at crate root when no `unsafe` is needed (pure-safe library).
 - Each `unsafe` block reviewed independently — soundness reasoning is local.
 
+## Version selection + upgrades
+
+- **New dependencies** (libraries, dev tools, CI actions): adopt the latest stable release at the time of introduction.
+- **Core language toolchain** (compiler / interpreter / runtime): never adopt an x.y.0 initial release — wait 3–4 weeks after release and target x.y.1 or the first patch in that window. If the current x.y.0 is younger than that, stay on the previous stable line and note the pending upgrade.
+- **Existing dependencies**: upgrades are suggest-only — surface the suggestion (current → available, and why it matters); never bump automatically or as a side effect of unrelated work. The operator decides when.
+
 ## What this document does NOT cover
 
 - General Rust education (see The Rust Book + Rust by Example)

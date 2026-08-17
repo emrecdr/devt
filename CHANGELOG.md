@@ -8,6 +8,12 @@ Older releases (v0.1.0–v0.208.0) are rotated into `docs/archive/CHANGELOG-hist
 
 ## [Unreleased]
 
+### Version-selection policy in every template: latest-stable adoption, a toolchain .0 embargo, and suggest-only upgrades
+
+All six templates' `coding-standards.md` gain an identical `Version Selection & Upgrades` section (operator-set policy): new dependencies adopt the latest stable at introduction; core language toolchains never adopt an `x.y.0` initial release — wait 3–4 weeks and target `x.y.1` or the first patch in that window; and upgrades to existing dependencies are **suggest-only** — an agent surfaces current → available and why it matters, and never bumps automatically or as a side effect of unrelated work. The third clause is the load-bearing one for agent behavior: unrequested version churn is scope creep with real breakage risk, so upgrade timing belongs to the operator.
+
+K348 anchors both load-bearing sentences across all six templates — the same drift class K336 guards for golden rules, where an agnostic rule had silently shipped in only two of six templates. Probed: mutating one anchor in one template turns the gate red naming the file and the missing clause.
+
 ### An operator asked for parallel review in writing and was silently single-routed — twice over
 
 A second field evaluation (a five-lane review run on a downstream project) filed six findings; four survived verification against the code and the run's own artifacts, one was disproven by the run's own hook trace, and one had already been half-built. The confirmed ones share a theme: gates and routing that mislead about their own state.
