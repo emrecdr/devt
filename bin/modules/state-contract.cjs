@@ -278,6 +278,27 @@ const JSON_SIDECAR_SCHEMAS = {
               && typeof d.lane_scores_null_reason !== "string")
         ? 'lane_scores[] contains null score(s) without "lane_scores_null_reason" — a silent null distribution masks a broken self-grading path'
         : null,
+      // envelope_health had no schema, so two field lanes reporting the SAME
+      // degradation emitted incompatible shapes (one bare string, one object)
+      // and no consumer could parse the field reliably. Optional, but when
+      // present it must be the structured form mirroring the dispatch-side
+      // <envelope_health> block: status enum + block-name arrays.
+      (d) => {
+        if (d.envelope_health === undefined) return null;
+        const eh = d.envelope_health;
+        if (eh === null || typeof eh !== "object" || Array.isArray(eh)) {
+          return '"envelope_health" must be an object {status, empty[], placeholder[], note} — a bare string is unparseable to consumers';
+        }
+        if (!["healthy", "degraded"].includes(eh.status)) {
+          return `"envelope_health.status" must be "healthy" or "degraded" (got ${JSON.stringify(eh.status)})`;
+        }
+        for (const k of ["empty", "placeholder"]) {
+          if (eh[k] !== undefined && !Array.isArray(eh[k])) {
+            return `"envelope_health.${k}" must be an array of block names`;
+          }
+        }
+        return null;
+      },
     ],
   },
 };

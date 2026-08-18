@@ -6,7 +6,7 @@ argument-hint: "<scope-description>"
 
 # Parallel-Lane Code Review Workflow
 
-> This workflow re-uses code-review.md's context_init payload, and its `verify` + `present_findings` step bodies are SINGLE-SOURCED in `workflows/code-review.steps.md` (loaded at the SHARED-STEP pointers below with MODE=parallel) — edit that file, never a local copy.
+> This workflow re-uses code-review.md's context_init payload, and its `verify` + `present_findings` step bodies are SINGLE-SOURCED in `workflows/code-review.steps.md` (loaded at the SHARED-STEP pointers below with MODE=parallel) — edit that file, never a local copy. The pointer stubs are real `<step>` elements deliberately: as HTML comments at end-of-file they were invisible to a scanning orchestrator, and a field run skipped all three (verify, auto_curator, present_findings) while stamping the phases DONE.
 
 This workflow is invoked from `code-review.md::scope_check` when the review scope exceeds 10 files AND the user opts into parallel via `AskUserQuestion`. It is NOT a user-facing slash command — there is no `/devt:review-parallel`; the routing is internal to `/devt:review`.
 
@@ -303,13 +303,20 @@ for LANE_ID in $(printf '%s\n' "$LANES_JSON" | jq -r '.lanes[] | select(.status 
 done
 ```
 
-**Narrowed redispatch prompt template (B-IX)** — issue ONE message with N Task() calls (one per stub_redispatched lane), using ALL the same context blocks (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<lane_id>`, `<lane_files>`, etc. — every L1-required block from dispatch_lanes) BUT replace the `<task>` instruction with the scoped form below. The output file path stays identical so consolidate picks up the new content.
+**Narrowed redispatch via the render helper (B-IX).** Do NOT hand-assemble the retry prompt. The retry is reached exactly when the run is already degraded, and a field run that improvised its retry prompts here dropped `<scope_trust>`, `<scope_hint>`, and `<memory_signal>` from every retried lane — both retry lanes self-reported `envelope_health: degraded` while the round-1 envelopes on disk were fully populated. Re-render only the stub lanes from their registered context, with the narrowed ask injected per lane:
 
-```text
-<task>SCOPED REDISPATCH (1/1 retry budget): the prior dispatch returned stub-quality output (substance check failed). Re-review the files listed in <lane_files>, but constrain scope to the **5 highest-signal findings only** — pick the issues whose severity × blast-radius is greatest, write a substantive `## Finding N: <title>` block for each (description, evidence, remediation), and explicitly drop everything else. The full file path coverage of the prior dispatch is NOT required this time. Write to <review_file_for_this_lane>. Cap the markdown at ~4 KB.</task>
+```bash
+LANES_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" state list-lane-outputs)
+STUB_IDS=$(printf '%s\n' "$LANES_JSON" | jq -r '[.lanes[] | select(.status == "stub_redispatched") | .id] | join(",")')
+FOCUS='SCOPED REDISPATCH (1/1 retry budget): the prior dispatch returned stub-quality output (substance check failed). Constrain scope to the 5 highest-signal findings only — pick the issues whose severity × blast-radius is greatest, write a substantive "## Finding N: <title>" block for each (description, evidence, remediation), and explicitly drop everything else. Full file-path coverage of the prior dispatch is NOT required this time. Cap the markdown at ~4 KB.'
+RENDER_ARGS=(dispatch render-lanes "--only=${STUB_IDS}" --out=.devt/state/lane-redispatch)
+for LANE_ID in ${STUB_IDS//,/ }; do RENDER_ARGS+=("--lane-${LANE_ID}-focus=${FOCUS}"); done
+node "${CLAUDE_PLUGIN_ROOT}/bin/devt-tools.cjs" "${RENDER_ARGS[@]}"
 ```
 
-Why this works: oversized + low-information lanes hit maxTurns because the agent tries to cover everything shallowly. Constraining to top-5 lets the limited budget produce substantive findings on the issues that actually matter. The orchestrator's `## Out-of-Scope Findings (Deferred)` synthesis step (consolidate) already absorbs lanes that go deferred, so completeness loss here is intentional and bounded.
+`--only` re-renders just the named lanes against the full registry (neighbor ownership stays intact); the focus text rides as `<lane_focus>` on top of the canonical envelope, so every L1-required block (`<scope_trust>`, `<scope_hint>`, `<memory_signal>`, `<lane_id>`, `<lane_files>`, rubric refs) arrives machine-built, and the review-file write path stays identical so consolidate picks up the new content. Issue ONE message with N Task() calls, one per stub lane, each using the paste-ready pointer stub the command prints (`<correlation_id>` + `<envelope path=…>`).
+
+Why the narrowing works: oversized + low-information lanes hit maxTurns because the agent tries to cover everything shallowly. Constraining to top-5 lets the limited budget produce substantive findings on the issues that actually matter. The orchestrator's `## Out-of-Scope Findings (Deferred)` synthesis step (consolidate) already absorbs lanes that go deferred, so completeness loss here is intentional and bounded.
 
 After all Task() calls return, re-run substance_check_lanes via the bash loop — but this time a lane that's still non-substantive becomes terminal. Distinguish two terminal failures for coverage honesty: a **present-but-thin** stub → `deferred` (it reviewed *something*); a file that is **missing or zero-byte** even after retry → `lane_failed` (it reviewed *nothing*). `check-agent-output` flags the latter with `missing:true` / `empty:true`.
 
@@ -614,8 +621,20 @@ A guard that cannot evaluate must say so **where the review is read**, not only 
 
 </step>
 
-<!-- SHARED-STEP:verify — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `verify` step at THIS pipeline position with MODE=parallel — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
+<step name="verify" gate="SHARED-STEP body executed — verification artifacts written">
 
-<!-- SHARED-STEP:auto_curator — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the parallel path previously had NO auto_curator step while the shared present_findings gate demanded its artifact — field-reported as a hand-run workaround). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `auto_curator` step at THIS pipeline position with MODE=parallel — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
+SHARED-STEP:verify — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `verify` step at THIS pipeline position with MODE=parallel — blocks marked for the other mode are skipped; unmarked blocks always execute.
 
-<!-- SHARED-STEP:present_findings — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `present_findings` step at THIS pipeline position with MODE=parallel — blocks marked for the other mode are skipped; unmarked blocks always execute. -->
+</step>
+
+<step name="auto_curator" gate="SHARED-STEP body executed — auto-curator-considered.txt marker written">
+
+SHARED-STEP:auto_curator — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the parallel path previously had NO auto_curator step while the shared present_findings gate demanded its artifact — field-reported as a hand-run workaround). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `auto_curator` step at THIS pipeline position with MODE=parallel — blocks marked for the other mode are skipped; unmarked blocks always execute.
+
+</step>
+
+<step name="present_findings" gate="SHARED-STEP body executed — findings presented with verdict + required caveats">
+
+SHARED-STEP:present_findings — step body relocated to workflows/code-review.steps.md (single source shared by code-review.md and code-review-parallel.md; the copy-paste KEEP-IN-SYNC era let the two bodies drift apart, including silently lost gates). **Mandatory action: Read `${CLAUDE_PLUGIN_ROOT}/workflows/code-review.steps.md` now** (skip the Read if the file is already loaded in this session), then execute its `present_findings` step at THIS pipeline position with MODE=parallel — blocks marked for the other mode are skipped; unmarked blocks always execute.
+
+</step>

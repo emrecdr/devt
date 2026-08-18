@@ -17548,13 +17548,17 @@ fi
 # K285: auto_curator single-sourced — step body lives once in the shared
 # steps file (parallel path previously had NO step while the shared gate
 # demanded its artifact); both parents carry MODE-tagged pointers; no
-# resident copy remains in either parent.
+# resident BODY copy remains in either parent. The parents legitimately
+# contain a `<step name="auto_curator">` pointer STUB (the step-element form
+# is load-bearing — HTML-comment pointers at EOF were field-skipped), so
+# residency is detected by a body-only marker (the config key the body reads),
+# not by the step tag.
 K285_BODY=$(/usr/bin/grep -c '<step name="auto_curator"' "$ROOT/workflows/code-review.steps.md" || true)
 K285_P1=$(/usr/bin/grep -c "SHARED-STEP:auto_curator" "$ROOT/workflows/code-review.md" || true)
 K285_P2=$(/usr/bin/grep -c "SHARED-STEP:auto_curator" "$ROOT/workflows/code-review-parallel.md" || true)
-K285_RES=$({ /usr/bin/grep -c '<step name="auto_curator"' "$ROOT/workflows/code-review.md" "$ROOT/workflows/code-review-parallel.md" || true; } | awk -F: '{s+=$2} END{print s+0}')
+K285_RES=$({ /usr/bin/grep -c 'memory\.auto_curator_min_candidates' "$ROOT/workflows/code-review.md" "$ROOT/workflows/code-review-parallel.md" || true; } | awk -F: '{s+=$2} END{print s+0}')
 if [ "$K285_BODY" = "1" ] && [ "$K285_P1" = "1" ] && [ "$K285_P2" = "1" ] && [ "$K285_RES" = "0" ]; then
-  pass "K285: auto_curator single-sourced in code-review.steps.md — pointers in both parents, no resident copies"
+  pass "K285: auto_curator single-sourced in code-review.steps.md — pointer stubs in both parents, no resident body copies"
 else
   fail "K285: auto_curator partition broken — body=$K285_BODY p1=$K285_P1 p2=$K285_P2 resident=$K285_RES"
 fi
@@ -19405,6 +19409,110 @@ if [ -z "$K348_MISSING" ]; then
   pass "K348: version-selection policy (latest-stable adoption, x.y.0 toolchain embargo, suggest-only upgrades) aligned across all 6 templates' coding-standards.md"
 else
   fail "K348: version-selection policy missing from:$K348_MISSING — align the rule across every template (don't leave the set uneven)"
+fi
+
+# K349: review-tail silent-skip class (field: a parallel run stamped
+# phase=present_findings status=DONE with verify + auto_curator + the
+# present_findings body all unexecuted — the terminal `complete` gate set was
+# unreachable because nothing compels that transition).
+#   a  registry: both review types stage assert-verifier-ran +
+#      assert-auto-curator-considered at present_findings-entry.
+#   b  behavior: in a fixture, the field's exact stamp is REFUSED without
+#      verifier + curator evidence, and passes once both exist.
+#   c  pointer form: the three SHARED-STEP pointer stubs in BOTH parents are
+#      real <step> elements, and no HTML-comment pointer form remains —
+#      comments at EOF were invisible to a scanning orchestrator.
+K349_OK=1; K349_WHY=""
+for wt in code_review code_review_parallel; do
+  K349_REG=$(awk -v wt="  $wt:" '
+    $0 == wt {in_wt=1; next}
+    in_wt && /^  [a-z_]+:$/ {in_wt=0}
+    in_wt && /^    present_findings:$/ {in_pf=1; next}
+    in_pf && /^    [a-z_]+:$/ {in_pf=0}
+    in_pf && /assert-verifier-ran/ {v=1}
+    in_pf && /assert-auto-curator-considered/ {c=1}
+    END {print v+0 c+0}
+  ' "$ROOT/workflows/_phase-gates.yaml")
+  [ "$K349_REG" = "11" ] || { K349_OK=0; K349_WHY="$wt:registry($K349_REG)"; }
+done
+K349_T=$(mktemp -d); K349_T=$(cd "$K349_T" && pwd -P)
+mkdir -p "$K349_T/.devt/state"
+echo '{}' > "$K349_T/.devt/config.json"
+(cd "$K349_T" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=code_review_parallel active=true task="k349" >/dev/null 2>&1)
+if (cd "$K349_T" && node "$ROOT/bin/devt-tools.cjs" state update phase=present_findings status=DONE >/dev/null 2>&1); then
+  K349_OK=0; K349_WHY="skip-stamp-not-refused"
+fi
+printf '{"verdict":"pass","revisions":[]}\n' > "$K349_T/.devt/state/verification.json"
+printf '# Verification\n\npass\n' > "$K349_T/.devt/state/verification.md"
+echo "DISABLED" > "$K349_T/.devt/state/auto-curator-considered.txt"
+if ! (cd "$K349_T" && node "$ROOT/bin/devt-tools.cjs" state update phase=present_findings status=DONE >/dev/null 2>&1); then
+  K349_OK=0; K349_WHY="healthy-stamp-blocked"
+fi
+rm -rf "$K349_T"
+for wf in code-review.md code-review-parallel.md; do
+  P="$ROOT/workflows/$wf"
+  for st in verify auto_curator present_findings; do
+    /usr/bin/grep -q "<step name=\"$st\"" "$P" || { K349_OK=0; K349_WHY="$wf:$st-not-step-element"; }
+  done
+  if /usr/bin/grep -q '<!-- SHARED-STEP' "$P"; then K349_OK=0; K349_WHY="$wf:comment-pointer-form"; fi
+done
+if [ "$K349_OK" = "1" ]; then
+  pass "K349: review-tail silent-skip closed — staged present_findings gates (registry + refused/healthy stamps) + step-element pointer stubs in both parents"
+else
+  fail "K349: review-tail silent-skip regressed at $K349_WHY"
+fi
+
+# K350: parallel-review field batch (retry-path + lane-death + hygiene trio).
+#   a  render-lanes --only renders just the named lanes against the full
+#      registry (retry path re-renders stub lanes with machine-built context;
+#      a hand-assembled field retry dropped scope_trust/scope_hint/
+#      memory_signal), unknown id is a loud error, and the redispatch_lanes
+#      prose routes through the CLI instead of a hand-authored task template.
+#   b  every lane envelope carries <lane_budget> (five field lanes died on
+#      25-41 commands of breadth with zero findings written; retries under a
+#      budget completed in 6-15) and <graphify_status> renders the real
+#      three-way producer value, not the historical `{}` (consumers have
+#      parsed {skipped, reason?, impact_map?} since V65-3 with no producer).
+#   c  review.json envelope_health is schema-checked (two field lanes emitted
+#      incompatible shapes for the same degradation) and a register-lanes
+#      batch prunes lane ids outside the declared partition from registry +
+#      lane-files/ together (orphan-above-watermark trap).
+K350_OK=1; K350_WHY=""
+K350_T=$(mktemp -d); K350_T=$(cd "$K350_T" && pwd -P)
+mkdir -p "$K350_T/.devt/state"
+echo '{}' > "$K350_T/.devt/config.json"
+(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" state update workflow_type=code_review_parallel active=true task="k350" >/dev/null 2>&1)
+printf '{"lanes":[{"id":"L1","scope":"api","files":["a.py"]},{"id":"L2","scope":"web","files":["b.js"]},{"id":"L3","scope":"docs","files":["c.md"]}]}\n' > "$K350_T/lanes3.json"
+(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from=lanes3.json >/dev/null 2>&1)
+K350_ONLY=$(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes --only=L2 --out=envs 2>/dev/null | jq -r '"\(.lane_count):\(.registered_count):\(.only | join(","))"')
+[ "$K350_ONLY" = "1:3:L2" ] || { K350_OK=0; K350_WHY="only-filter($K350_ONLY)"; }
+if /usr/bin/grep -q 'L1 (api)' "$K350_T/envs/lane-L2.txt" && /usr/bin/grep -q 'L3 (docs)' "$K350_T/envs/lane-L2.txt"; then :; else K350_OK=0; K350_WHY="only-neighbors-lost"; fi
+if (cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes --only=L9 >/dev/null 2>&1); then K350_OK=0; K350_WHY="only-unknown-id-silent"; fi
+if /usr/bin/grep -q 'render-lanes "--only=${STUB_IDS}"' "$ROOT/workflows/code-review-parallel.md" \
+   && /usr/bin/grep -q 'Do NOT hand-assemble the retry prompt' "$ROOT/workflows/code-review-parallel.md"; then :; else K350_OK=0; K350_WHY="redispatch-prose-unwired"; fi
+/usr/bin/grep -q '<lane_budget>' "$K350_T/envs/lane-L2.txt" || { K350_OK=0; K350_WHY="lane-budget-missing"; }
+K350_GS=$(/usr/bin/grep -o '<graphify_status>[^<]*</graphify_status>' "$K350_T/envs/lane-L2.txt")
+[ "$K350_GS" = '<graphify_status>{"skipped":null}</graphify_status>' ] || { K350_OK=0; K350_WHY="graphify-status-null($K350_GS)"; }
+printf 'sparse graph\n' > "$K350_T/.devt/state/graphify-skip-reason.txt"
+(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" dispatch render-lanes --only=L2 --out=envs2 >/dev/null 2>&1)
+/usr/bin/grep -q '<graphify_status>{"skipped":true,"reason":"sparse graph"}</graphify_status>' "$K350_T/envs2/lane-L2.txt" || { K350_OK=0; K350_WHY="graphify-status-skip"; }
+printf '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer","envelope_health":"degraded"}\n' > "$K350_T/.devt/state/review.json"
+K350_EH=$(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" state read-sidecar --file review.json | jq -r '.validation.valid_fields')
+[ "$K350_EH" = "false" ] || { K350_OK=0; K350_WHY="envelope-health-string-accepted"; }
+printf '{"status":"DONE","verdict":"APPROVED","agent":"code-reviewer","envelope_health":{"status":"degraded","empty":["scope_trust"],"note":"n"}}\n' > "$K350_T/.devt/state/review.json"
+K350_EH2=$(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" state read-sidecar --file review.json | jq -r '.validation.valid_fields')
+[ "$K350_EH2" = "true" ] || { K350_OK=0; K350_WHY="envelope-health-object-rejected"; }
+printf '{"lanes":[{"id":"L1","scope":"api","files":["a.py"]},{"id":"L2","scope":"web","files":["b.js"]}]}\n' > "$K350_T/lanes2.json"
+K350_PRUNE=$(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" state register-lanes --from=lanes2.json 2>/dev/null | jq -r '.pruned_stale.ids | join(",")')
+[ "$K350_PRUNE" = "L3" ] || { K350_OK=0; K350_WHY="stale-prune($K350_PRUNE)"; }
+[ -f "$K350_T/.devt/state/lane-files/L3.json" ] && { K350_OK=0; K350_WHY="stale-sidecar-survives"; }
+K350_REG=$(cd "$K350_T" && node "$ROOT/bin/devt-tools.cjs" state list-lane-outputs | jq -r '[.lanes[].id] | join(",")')
+[ "$K350_REG" = "L1,L2" ] || { K350_OK=0; K350_WHY="stale-registry($K350_REG)"; }
+rm -rf "$K350_T"
+if [ "$K350_OK" = "1" ]; then
+  pass "K350: parallel-review field batch — --only retry path (CLI + prose), lane_budget + graphify_status producer in envelopes, envelope_health schema, declared-partition orphan prune"
+else
+  fail "K350: parallel-review field batch regressed at $K350_WHY"
 fi
 
 echo

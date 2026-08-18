@@ -284,6 +284,9 @@ function loadGraphImpact(projectRoot) {
       content: `(no graph-impact.md available — graphify skip reason: ${reason})`,
       bytes: buf.length,
       status: "skipped",
+      // Raw reason (without the prose wrapper) for structured consumers —
+      // the <graphify_status> producer emits it as {skipped:true, reason}.
+      skip_reason: reason,
     };
   }
   // Absence of both files says the map is missing; it does NOT say why. The

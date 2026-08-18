@@ -41,6 +41,16 @@
 # verification.json. Gating those mid-workflow would block every intermediate
 # transition with false positives. The raw-dispatch gate is the one signal
 # universally relevant at every phase boundary.
+#
+# Staged exception: a work-product gate ALSO fires at the earliest phase
+# boundary where its product must already exist under that workflow_type's
+# pipeline order. Both review pipelines run verify → auto_curator →
+# present_findings, so `state update phase=present_findings status=DONE`
+# gates on verifier + curator evidence. Terminal-only enforcement has a
+# reachability hole: nothing compels an orchestrator to ever take the
+# `complete` transition, and a field run stamped present_findings=DONE with
+# neither body executed — the terminal net never fired. A staged gate refuses
+# that exact stamp.
 
 workflow_types:
   code_review:
@@ -57,9 +67,14 @@ workflow_types:
     verify:
       gates:
         - assert-no-raw-dispatches-this-session
+    # Staged work-product gates — same rationale as code_review; the field
+    # receipt (present_findings stamped DONE, verify + auto_curator + body all
+    # skipped) came from THIS path.
     present_findings:
       gates:
         - assert-no-raw-dispatches-this-session
+        - assert-verifier-ran
+        - assert-auto-curator-considered
     # Terminal phase — full gate set
     complete:
       gates:
@@ -87,9 +102,13 @@ workflow_types:
     verify:
       gates:
         - assert-no-raw-dispatches-this-session
+    # Staged work-product gates: verify + auto_curator precede this phase, so
+    # their evidence must exist by entry (see header — reachability hole).
     present_findings:
       gates:
         - assert-no-raw-dispatches-this-session
+        - assert-verifier-ran
+        - assert-auto-curator-considered
     # Terminal phase — full gate set
     complete:
       gates:

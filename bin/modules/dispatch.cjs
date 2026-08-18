@@ -520,6 +520,20 @@ function buildSubstitutionTable(agent, loadOpts) {
     }
   } catch { /* missing brief / parse error → empty (degrades to existing memory_signal path) */ }
 
+  // <graphify_status> producer. The consumers (code-reviewer.md, tester.md)
+  // parse {skipped, reason?, impact_map?} and branch three ways, but no
+  // producer ever wrote graphify_status_json — every envelope rendered `{}`,
+  // which a field reader flagged as a permanently-broken feature. Derived
+  // from the same loader that inlines <graph_impact>, so the two blocks
+  // cannot disagree. "evicted" (map generated then lost) reports the honest
+  // null branch with a note rather than pointing skipped:false at a file
+  // that is not there.
+  const graphifyStatus =
+    gi.status === "present" ? { skipped: false, impact_map: ".devt/state/graph-impact.md" }
+      : gi.status === "skipped" ? { skipped: true, reason: gi.skip_reason || "(no reason recorded)" }
+      : gi.status === "evicted" ? { skipped: null, note: "impact map evicted after generation — fall back to grep/Read" }
+      : { skipped: null };
+
   return {
     governing_rules: { content: gr.content || {}, rules_hash: gr.rules_hash || "" },
     inline_guardrails: ig.content || {},
@@ -536,7 +550,7 @@ function buildSubstitutionTable(agent, loadOpts) {
     memory_signal_json: s.memory_signal_json,
     auto_memory_json: autoMemoryJson,
     god_node_warnings_json: s.god_node_warnings_json,
-    graphify_status_json: s.graphify_status_json,
+    graphify_status_json: s.graphify_status_json || graphifyStatus,
     task: _taskToText(s.task) || _taskToText(s.task_description),
     CLAUDE_PLUGIN_ROOT: process.env.CLAUDE_PLUGIN_ROOT || PLUGIN_ROOT,
     // Same value under the init-payload field name, so {plugin_root} fills
@@ -1547,7 +1561,7 @@ function run(subcommand, args) {
       // structurally impossible.
       //
       // Args: [target] [--target=agent:workflow] [--out=dir] [--inline-rules]
-      //       [--lane-<id>-focus=<text>]...
+      //       [--only=L2,L4] [--lane-<id>-focus=<text>]...
       const positional = args.filter(a => !a.startsWith("--"));
       const targetFlag = args.find(a => a.startsWith("--target="));
       let target = targetFlag
@@ -1556,6 +1570,12 @@ function run(subcommand, args) {
       const outFlag = args.find(a => a.startsWith("--out="));
       const outDir = outFlag ? outFlag.slice("--out=".length) : null;
       const inlineRules = args.includes("--inline-rules");
+      // Lane-subset re-render for the redispatch path: registered context +
+      // neighbor map stay intact while only the named lanes are emitted.
+      const onlyFlag = args.find(a => a.startsWith("--only="));
+      const only = onlyFlag
+        ? onlyFlag.slice("--only=".length).split(",").map(s => s.trim()).filter(Boolean)
+        : null;
       // Per-lane focus, same flag shape run-lanes accepts. cmdRenderLanes has
       // always honored focusByLane; only run-lanes ever passed it, so the
       // pointer-stub path the parallel workflow documents as the dispatch form
@@ -1565,7 +1585,7 @@ function run(subcommand, args) {
       // from one command.
       const focusByLane = _parseLaneFocusFlags(args);
       try {
-        const result = cmdRenderLanes(target, { outDir, inlineRules, focusByLane });
+        const result = cmdRenderLanes(target, { outDir, inlineRules, focusByLane, only });
         if (result.lane_count === 0) {
           // Don't silently exit non-zero — tell the operator why and how to
           // proceed. Round 9 #4 fix; previously empty stdout + exit 2 made
@@ -1845,9 +1865,25 @@ function cmdRenderLanes(target, options) {
     const areas = [...new Set(f.map((x) => (String(x).split("/")[0] || x)))].slice(0, 4);
     return { id: l.id, community: c, count: f.length, areas };
   });
+  // --only=<ids> renders a subset against the FULL registry: laneOwnership is
+  // computed above from every registered lane, so a redispatched lane still
+  // sees all its neighbors and keeps routing cross-lane findings instead of
+  // adopting them. Unknown ids are an error, not a silent skip — the caller
+  // is mid-redispatch, exactly where an empty render indistinguishable from
+  // success does the most damage.
+  let renderSet = lanes;
+  if (Array.isArray(options.only) && options.only.length > 0) {
+    const wanted = new Set(options.only);
+    const known = new Set(lanes.map((l) => l.id));
+    const unknown = [...wanted].filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      throw new Error(`render-lanes --only: unknown lane id(s): ${unknown.join(", ")} — registered: ${[...known].join(", ")}`);
+    }
+    renderSet = lanes.filter((l) => wanted.has(l.id));
+  }
   const out = [];
   const summary = [];
-  for (const lane of lanes) {
+  for (const lane of renderSet) {
     let files = [];
     let community = lane.community || "";
     try {
@@ -1974,6 +2010,18 @@ function cmdRenderLanes(target, options) {
       }
       blockLines.push(`    <lane_method>${method}</lane_method>`);
     }
+    // Evidence-budget discipline. Field receipt: five first-round lanes died
+    // at the turn wall on 25-41 shell commands of breadth-first evidence
+    // gathering with ZERO findings written (one lane announced "writing the
+    // review" as its final act and lost everything); the narrowed retries
+    // completed in 6-15 commands. Breadth was the killer, not test execution
+    // — two of the dead lanes ran no test command at all, and the single
+    // highest-value act of the round was a lane's own targeted mutation
+    // test. So: soft exploration ceiling + write-early + finding cap, NOT a
+    // command-category ban.
+    blockLines.push(
+      `    <lane_budget>Evidence-gathering discipline: write your review file EARLY — stub it on your first write, then append each finding as you confirm it, so a budget wall costs you one finding, not the review. Treat ~15 evidence-gathering commands as your exploration budget; if you pass ~20 without a NEW confirmed finding, STOP exploring and write up what you have. Prefer this lane's diff over re-deriving repo state; at most 2 graphify queries. Cap the review at the highest-signal findings (severity × blast radius) rather than exhaustive coverage — a deep report on 5 real issues beats a shallow pass over everything. Targeted verification of one specific finding (a focused test run, mutating one assertion to prove a test bites) is budget well spent; whole-suite runs, coverage sweeps, and caller-chasing beyond your lane files are how lanes die with nothing written.</lane_budget>`,
+    );
     // M3 (cal #30.5) — optional directive blocks. Per
     // [[feedback_canonical_path_expressiveness]]: operators hand-roll when
     // canonical paths can't carry custom directives. These blocks let
@@ -2057,7 +2105,7 @@ function cmdRenderLanes(target, options) {
     );
   }
   const result = {
-    lane_count: lanes.length,
+    lane_count: renderSet.length,
     text: out.join("\n"),
     lanes: summary,
     target,
@@ -2066,6 +2114,10 @@ function cmdRenderLanes(target, options) {
     rules_mode: rulesByReference ? "by-reference" : "inline",
     rubric_mode: rulesByReference ? "by-reference" : "inline",
   };
+  if (renderSet.length !== lanes.length) {
+    result.only = renderSet.map((l) => l.id);
+    result.registered_count = lanes.length;
+  }
   // Disk preflight (cal #38.C, pre-fan-out surface) — warn-only. This is the
   // moment right before N lane transcripts start accumulating, the exact spot
   // a field run hit ENOSPC mid-lane. Surface a low-disk signal so the

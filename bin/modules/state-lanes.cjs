@@ -1071,6 +1071,55 @@ function registerLanesFromYaml(filePath) {
     results.push({ ...row, scope: row.community, files: row.file_count });
     if (!r.ok) errors.push({ id: entry.id, reason: r.reason });
   }
+  // A batch registration DECLARES the full partition, so lanes outside it are
+  // stale by definition — but same-id overwrite alone leaves every id ABOVE
+  // the new lane count orphaned (field: a 5-lane partition after an 8-lane
+  // run left L6-L8 sidecars from two partitions back on disk; reset-soft
+  // never descends into lane-files/). The registry and sidecar dir are
+  // pruned TOGETHER: deleting only sidecars would leave registry entries
+  // that render as fileless envelopes, the inverse inconsistency. Single
+  // `register-lane` calls still merge — only the batch path declares.
+  const prunedStale = { ids: [], sidecars: 0, registry: 0, diffs: 0 };
+  const wantedIds = new Set(lanes.map((e) => e && e.id).filter(Boolean));
+  {
+    const dir = getStateDir();
+    const wfPath = path.join(dir, "workflow.yaml");
+    const lockFile = acquireLock();
+    try {
+      if (fs.existsSync(wfPath)) {
+        const st = parseSimpleYaml(fs.readFileSync(wfPath, "utf8"));
+        if (Array.isArray(st.lanes)) {
+          const kept = st.lanes.filter((l) => l && wantedIds.has(l.id));
+          const removed = st.lanes.filter((l) => l && !wantedIds.has(l.id)).map((l) => l.id);
+          if (removed.length > 0) {
+            st.lanes = kept;
+            atomicWriteFileSync(wfPath, serializeSimpleYaml(st));
+            prunedStale.registry = removed.length;
+            for (const id of removed) if (!prunedStale.ids.includes(id)) prunedStale.ids.push(id);
+          }
+        }
+      }
+      const sidecarDir = path.join(dir, "lane-files");
+      if (fs.existsSync(sidecarDir)) {
+        for (const fname of fs.readdirSync(sidecarDir)) {
+          const m = fname.match(/^(L\d+)\.json$/);
+          if (!m || wantedIds.has(m[1])) continue;
+          // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+          try { fs.unlinkSync(path.join(sidecarDir, fname)); prunedStale.sidecars += 1; } catch { /* already gone */ }
+          if (!prunedStale.ids.includes(m[1])) prunedStale.ids.push(m[1]);
+        }
+      }
+      for (const id of prunedStale.ids) {
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+        const diffPath = path.join(dir, `lane-diff-${id}.txt`);
+        if (fs.existsSync(diffPath)) {
+          try { fs.unlinkSync(diffPath); prunedStale.diffs += 1; } catch { /* already gone */ }
+        }
+      }
+    } finally {
+      releaseLock(lockFile);
+    }
+  }
   // Cross-lane disjointness check — WARN-only, never blocks. The parallel
   // review workflow assumes disjoint file slices; hand-rolled partitions can
   // double-assign a file, which costs duplicated review tokens + conflicting
@@ -1093,6 +1142,10 @@ function registerLanesFromYaml(filePath) {
     .filter(([, owners]) => owners.filter((o) => !lensLanes.has(o)).length > 1)
     .map(([file, owners]) => ({ file, lanes: owners }));
   const out = { ok: errors.length === 0, registered: results, errors };
+  if (prunedStale.ids.length > 0) {
+    out.pruned_stale = prunedStale;
+    out.pruned_note = `pruned ${prunedStale.ids.length} stale lane id(s) outside the declared partition (${prunedStale.ids.join(", ")}): ${prunedStale.registry} registry entries, ${prunedStale.sidecars} lane-files sidecars, ${prunedStale.diffs} lane-diff artifacts`;
+  }
   if (overlaps.length > 0) {
     out.overlap_warning = `${overlaps.length} file(s) assigned to multiple lanes — duplicated review tokens + conflicting findings likely; lanes are expected to be disjoint`;
     out.overlaps = overlaps.slice(0, 10);

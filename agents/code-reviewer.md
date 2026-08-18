@@ -148,7 +148,7 @@ This assertion is intentionally strict: even one of the three blocks being prese
     - `empty: ["graph_impact"]` → "graphify did not run — caller-set verification used Read/Grep rather than blast_radius"
     - `placeholder: ["rubric_content"]` → "inline_rubrics substitution failed — fell back to Read <rubric_path>"
 
-The soft signal lets verifiers + maintainers see WHICH inputs degraded the review, separate from the review's verdict. NOT a gate — don't refuse the dispatch on degradation.
+The soft signal lets verifiers + maintainers see WHICH inputs degraded the review, separate from the review's verdict. NOT a gate — don't refuse the dispatch on degradation. **Sidecar shape (machine half of the signal):** when you record degradation, ALSO write an `envelope_health` field to your JSON sidecar, exactly `{"status": "healthy|degraded", "empty": [<block names>], "placeholder": [<block names>], "note": "<one line: what the review compensated with>"}` — never a bare string (field case: two lanes reporting the same degradation emitted incompatible shapes, so no consumer could parse either). Block names verbatim from the envelope's own envelope_health JSON. This applies equally when the dispatch carries NO `<envelope_health>` block: if required context blocks are absent from a hand-assembled dispatch, self-detect and emit `status: "degraded"` with the missing blocks in `empty` — that record distinguishes a degraded retry from a broken renderer.
 </step>
 
 <step name="spec_compliance">
