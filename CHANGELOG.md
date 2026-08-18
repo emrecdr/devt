@@ -4,9 +4,11 @@ All notable changes to devt will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versions follow [Semantic Versioning](https://semver.org/). The `[Unreleased]` section below stages changes for the next version — when bumping, rename it to `## [X.Y.Z] - YYYY-MM-DD` so the release workflow's changelog extractor (`scripts/extract-changelog.sh`) can find it.
 
-Older releases (v0.1.0–v0.208.0) are rotated into `docs/archive/CHANGELOG-historical.md` — the root file keeps `[Unreleased]` plus the most recent releases (rotation ceiling enforced by smoke gate K288).
+Older releases (v0.1.0–v0.209.0) are rotated into `docs/archive/CHANGELOG-historical.md` — the root file keeps `[Unreleased]` plus the most recent releases (rotation ceiling enforced by smoke gate K288).
 
 ## [Unreleased]
+
+## [0.244.0] - 2026-08-18
 
 ### A parallel review stamped three phases DONE without executing them — and six more findings from the first full-fan-out field run
 
@@ -890,19 +892,3 @@ Post-release adversarial validation of the 0.205.0–0.209.0 batch: every new ga
 ### Added
 
 - **Gate K326 — state-router ReferenceError sweep.** Invokes every router verb (73 at gate time) in a minimal fixture and asserts none dies on an unresolved identifier — the regression net for the facade-split risk class, where a function moved between state submodules references a name its new home doesn't import and fails at CALL time (both real breaks of this class — `_assertLanesRegistered→listLaneOutputs` and `computeGraphifyImpactPlan→_activeRange` — shipped past load checks and a flat import audit). Known limit stated in the gate: a verb that swallows the error in a bare catch hides it from the sweep too; per-verb behavioral gates remain the deep net. Current sweep: 0/73 hits.
-
-
-## [0.209.0] - 2026-07-26
-
-### Added
-
-- **The memory-doc batch — three decisions the sessions kept re-deriving are now tombstoned.** `ADR-003` (Agent Teams adoption deferred: experimental + non-`/resume`-restorable, while file-based state is load-bearing for `/devt:next` — trigger named in RETIREMENT-WATCH), `REJ-003` (no OpenTelemetry/telemetry SDK: zero-dep contract, SDK init would dwarf the measured 26–73ms hook fires, no cross-process audience — JSONL side-channels + aggregation verbs are the stack), `REJ-004` (no Rust/native CLI rewrite: zero-build Node stdlib IS the distribution contract; node startup ~26ms is the measured floor, a binary buys ~25ms/call for a per-platform build matrix). All indexed, FTS-retrievable, and keyword-armed against re-proposal.
-
-### Removed
-
-- **`scripts/check-docs.sh` retired.** Doc-completeness checker for a user project's `.devt/rules/documentation.md`, invoked by no workflow, agent, skill, or CI surface — the same maintained-but-unwired class as the retired injection scanner. RETIREMENT-WATCH records it as revivable receipt-gated if a docs workflow ever wants a deterministic completeness leg.
-
-### Validated non-issues (measured, not shipped)
-
-- **Lazy facade requires — refuted by measurement.** The entire 5-submodule state family parses in **+2ms** over bare node startup (28ms vs 26ms; full CLI verbs 37–39ms warm). Lazy getters plus ~50 call-site rewrites to save 2ms fails the receipt bar; the earlier ~440ms stop-hook reading was load-inflated, not require-dominated.
-- **bash-guard in-process fast path — deferred with a named trigger.** Measured chain: runner-node 26ms + bash ~8ms + CLI-node 39ms = **73ms warm**; in-process would save ~45ms/call (~1–2s/day at observed frequency) at the cost of a second execution model inside the runner. Recorded in RETIREMENT-WATCH's receipt-gated list — TRIGGER: sustained warm p50 > 250ms on a PreToolUse guard, or an order-of-magnitude frequency jump.
